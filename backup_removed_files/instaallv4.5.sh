@@ -1,3 +1,6 @@
+# Backup of /instaallv4.5.sh
+# Backed up on 2026-02-26
+
 #!/bin/bash
 
 echo "=== EvoAI V4.5 Full Installer ==="

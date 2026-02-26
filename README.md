@@ -1,3 +1,4 @@
+````markdown
 # EvoAI V4.5
 
 Local semantic assistant using sentence-transformers.
@@ -77,3 +78,9 @@ Next steps
 ----------
 - Add persistent embedding cache (optional) and more structured indexing for large memories.
 - Add unit tests and a CI workflow to preserve deterministic setup.
+
+Cleanup
+-------
+- Obsolete installer and upgrade scripts plus legacy `launch_v4.py` were moved to `backup_removed_files/` on 2026-02-26 to keep the repository tidy.
+
+````

@@ -1,3 +1,6 @@
+# Backup of /upgrade_v4.5.1.sh
+# Backed up on 2026-02-26
+
 #!/bin/bash
 
 echo "=== Upgrading EvoAI V4.5 (Intel Optimized) ==="
