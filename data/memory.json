@@ -1,11 +1,14 @@
 [
   {
-    "user": "This is a long message to test handling. This is a long message to test handling. This is a long message to test handling. This is a long message to test handling. This is a long message to test handling. This is a long message to test handling. This is a long message to test handling. This is a long message to test handling. This is a long message to test handling. This is a long message to test handling. This is a long message to test handling. This is a long message to test handling. This is a long message to test handling. This is a long message to test handling. This is a long message to test handling. This is a long message to test handling. This is a long message to test handling. This is a long message to test handling. This is a long message to test handling. This is a long message to test handling. This is a long message to test handling. This is a long message to test handling. This is a long message to test handling. This is a long message to test handling. This is a long message to test handling. This is a long message to test handling. This is a long message to test handling. This is a long message to test handling. This is a long message to test handling. This is a long message to test handling. This is a long message to test handling. This is a long message to test handling. This is a long message to test handling. This is a long message to test handling. This is a long message to test handling. This is a long message to test handling. This is a long message to test handling. This is a long message to test handling. This is a long message to test handling. This is a long message to test handling. "
+    "user": "foo bar baz"
   },
   {
-    "user": "alpha"
+    "assistant": "I understand you said: 'foo bar baz'"
   },
   {
-    "user": "beta"
+    "user": "foo bar baz"
+  },
+  {
+    "assistant": "You've already said that. Could you expand or change the topic?"
   }
 ]

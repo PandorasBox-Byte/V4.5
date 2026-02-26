@@ -61,6 +61,26 @@ Config via environment variables
 - `EVOAI_MAX_MEMORY` (default `500`) — maximum retained memory entries; older entries are pruned.
 - `EVOAI_TORCH_THREADS` (default `8`) — `torch.set_num_threads`.
 
+### Training & fine‑tuning
+
+A helper module (`core/trainer.py`) lets you fine-tune the embedding model or
+LLM on custom data.  Models are saved under `data/finetuned-model` and
+`data/llm_finetuned` by default.  When launching the engine you can point at a
+fine‑tuned embedding model using `EVOAI_FINETUNED_MODEL` (this overrides
+`EVOAI_MODEL`).
+
+Here are a couple of simple CLI examples:
+
+```bash
+# embeddings (two pairs provided for demonstration)
+python -m core.trainer embeddings --pairs "hi" "hello" "how are you" "good"
+
+# LLM (uses dummy base model in tests)
+python -m core.trainer llm --convs "hi" "hello" --base dummy
+```
+
+The `Trainer` API can also be used programmatically from Python.
+
 Files added/modified
 --------------------
 - `run_v6.sh` — supervised launcher (tmux preferred).

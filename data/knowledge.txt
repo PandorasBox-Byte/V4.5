@@ -1,2 +1,0 @@
-EvoAI is a local semantic assistant running on an Intel-based Mac.
-It uses sentence embeddings for similarity search.
