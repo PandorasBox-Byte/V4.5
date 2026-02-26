@@ -9,3 +9,4 @@
 v4env/** filter=lfs diff=lfs merge=lfs -text
 *.dylib filter=lfs diff=lfs merge=lfs -text
 *.bin filter=lfs diff=lfs merge=lfs -text
+data/finetuned-model/** filter=lfs diff=lfs merge=lfs -text
