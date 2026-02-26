@@ -11,3 +11,7 @@ dist/
 # Large model & data artifacts (keep out of git)
 data/finetuned-model/
 data/embeddings.pt
+# ignore venvs
+v311env/
+.venv/
+.venv311/
