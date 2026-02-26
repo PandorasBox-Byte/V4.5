@@ -1,0 +1,10 @@
+v4env/
+__pycache__/
+.DS_Store
+data/memory.json
+.pytest_cache/
+*.pyc
+env/
+venv/
+*.egg-info/
+dist/
