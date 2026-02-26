@@ -104,3 +104,6 @@ Cleanup
 - Obsolete installer and upgrade scripts plus legacy `launch_v4.py` were moved to `backup_removed_files/` on 2026-02-26 to keep the repository tidy.
 
 ````
+
+
+Pushed to GitHub on copilot-worktree-2026-02-26T04-13-33
