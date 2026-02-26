@@ -28,14 +28,15 @@ class PluginTests(unittest.TestCase):
         plugins = load_plugins("nonexistent_dir")
         self.assertEqual(plugins, [])
 
-    def test_load_dummy(self, tmp_path):
-        tmpdir = str(tmp_path)
-        create_dummy_plugin(tmpdir)
-        plugins = load_plugins(tmpdir)
-        self.assertEqual(len(plugins), 1)
-        p = plugins[0]
-        self.assertTrue(isinstance(p, ResearchPlugin))
-        self.assertEqual(p.handle('hello', None), 'hi')
+    def test_load_dummy(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmpdir:
+            create_dummy_plugin(tmpdir)
+            plugins = load_plugins(tmpdir)
+            self.assertEqual(len(plugins), 1)
+            p = plugins[0]
+            self.assertTrue(isinstance(p, ResearchPlugin))
+            self.assertEqual(p.handle('hello', None), 'hi')
 
 
 if __name__ == "__main__":

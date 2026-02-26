@@ -14,7 +14,7 @@ for i in $(seq 1 "$RUNS"); do
   rm -f data/memory.json data/embeddings.pt
 
   echo "Running unit tests (verbosity)..."
-  "$PY" -m unittest tests.test_engine -v || {
+  "$PY" -m unittest discover -s tests -v || {
     echo "Tests failed on run $i" >&2
     exit 1
   }

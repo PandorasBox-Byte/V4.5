@@ -34,8 +34,12 @@ trap 'cleanup_tmux; exit 0' INT TERM
 
 if command -v tmux >/dev/null 2>&1; then
   cleanup_tmux
+  # enable the REST API so the monitor UI can poll it
+  export EVOAI_ENABLE_API=1
+  export EVOAI_API_ADDR=127.0.0.1
+  export EVOAI_API_PORT=8000
   tmux new-session -d -s "$TMUX_SESSION" "cd '$BASE_DIR' && source '$VENV' && python3 core/launcher.py"
-  tmux split-window -h -t "$TMUX_SESSION" "cd '$BASE_DIR' && source '$VENV' && python3 tools/monitor.py --pidfile '$PIDFILE'"
+  tmux split-window -h -t "$TMUX_SESSION" "cd '$BASE_DIR' && source '$VENV' && python3 core/monitor_ui.py --api http://127.0.0.1:8000"
   echo "Attaching to tmux session '$TMUX_SESSION' (Ctrl+b then d to detach)."
   tmux attach -t "$TMUX_SESSION"
   cleanup_tmux
@@ -43,7 +47,11 @@ if command -v tmux >/dev/null 2>&1; then
 else
   # Fallback: open a new Terminal.app window for the monitor (macOS)
   if command -v osascript >/dev/null 2>&1; then
-    MON_CMD="cd '$BASE_DIR' && source '$VENV' && python3 tools/monitor.py --pidfile '$PIDFILE'"
+    # enable REST API for monitor UI
+    export EVOAI_ENABLE_API=1
+    export EVOAI_API_ADDR=127.0.0.1
+    export EVOAI_API_PORT=8000
+    MON_CMD="cd '$BASE_DIR' && source '$VENV' && python3 core/monitor_ui.py --api http://127.0.0.1:8000"
     osascript -e "tell application \"Terminal\" to do script \"$MON_CMD\""
     # Run engine in current terminal (so user interacts directly)
     python3 core/launcher.py

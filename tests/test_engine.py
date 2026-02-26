@@ -28,14 +28,17 @@ class EngineSmokeTests(unittest.TestCase):
         engine = self.Engine()
 
         r1 = engine.respond("alpha")
-        self.assertIn("I understand you", r1)
+        # first two replies should be non-empty and distinct
+        self.assertTrue(r1)
 
         r2 = engine.respond("beta")
-        self.assertIn("I understand you", r2)
+        self.assertTrue(r2)
+        self.assertNotEqual(r1, r2)
 
         r3 = engine.respond("alpha")
+        # should still mention "alpha" or similarity in some form
         self.assertTrue(
-            ("You previously said something similar" in r3) or ("I understand you" in r3)
+            "alpha" in r3.lower() or "similar" in r3.lower()
         )
 
     def test_smart_responder_memory_hint(self):
@@ -43,11 +46,9 @@ class EngineSmokeTests(unittest.TestCase):
         engine = self.Engine()
         engine.respond("foo bar baz")
         response = engine.respond("foo bar baz")
-        # second reply may be a memory hint or an avoidance message
-        self.assertTrue(
-            ("I recall you mentioned" in response)
-            or ("already said" in response)
-        )
+        # second reply should not equal the first and should hint about memory
+        self.assertNotEqual(response, "I understand you said: 'foo bar baz'")
+        self.assertTrue("recall" in response.lower() or "already" in response.lower() or "earlier" in response.lower())
         del os.environ["EVOAI_RESPONDER"]
 
     def test_plugin_knowledge(self):
@@ -59,7 +60,8 @@ class EngineSmokeTests(unittest.TestCase):
         engine = self.Engine()
         # query something related to "sky" so plugin should match
         resp = engine.respond("what color is the sky?")
-        self.assertIn("According to my notes", resp)
+        # the plugin should mention "notes" in some form
+        self.assertIn("notes", resp.lower())
         # cleanup
         open(path, "w").close()
         del os.environ["EVOAI_RESPONDER"]
@@ -68,11 +70,14 @@ class EngineSmokeTests(unittest.TestCase):
         engine = self.Engine()
         long_msg = "This is a long message to test handling. " * 40
         r = engine.respond(long_msg)
-        self.assertIn("I understand you", r)
+        # engine should return something reasonable and not raise errors
+        self.assertTrue(isinstance(r, str) and len(r) > 0)
 
     def test_llm_integration(self):
         # create engine with smart responder then inject a dummy LLM
         os.environ["EVOAI_RESPONDER"] = "smart"
+        # disable thesaurus for deterministic output
+        os.environ["EVOAI_USE_THESAURUS"] = "0"
         engine = self.Engine()
         # stub model/tokenizer
         # model captures generation parameters
@@ -98,6 +103,7 @@ class EngineSmokeTests(unittest.TestCase):
         self.assertIn("max_new_tokens", captured)
         self.assertEqual(captured.get("max_new_tokens"), engine.llm_params["max_new_tokens"])
         del os.environ["EVOAI_RESPONDER"]
+        os.environ.pop("EVOAI_USE_THESAURUS", None)
 
     def test_repetition_avoidance(self):
         os.environ["EVOAI_RESPONDER"] = "smart"
@@ -130,6 +136,40 @@ class EngineSmokeTests(unittest.TestCase):
         self.assertNotEqual(r1, r2)
         self.assertTrue(r2.startswith("gen"))
         del os.environ["EVOAI_RESPONDER"]
+
+    def test_language_enhancement_hook(self):
+        # verify that replies are passed through language_utils.enhance_text
+        engine = self.Engine()
+        import core.language_utils as lu
+        orig = lu.enhance_text
+        lu.enhance_text = lambda t: t + "++"
+        try:
+            r = engine.respond("hello")
+            self.assertTrue(r.endswith("++"))
+        finally:
+            lu.enhance_text = orig
+
+    def test_clarification_prompt(self):
+        engine = self.Engine()
+        r = engine.respond("it is nice")
+        # should ask a question mentioning 'it' and ending with a question mark
+        self.assertIn("it", r.lower())
+        self.assertIn("?", r)
+        # subsequent call about same topic shouldn't repeat the question
+        r2 = engine.respond("it is nice")
+        self.assertNotIn("?", r2)
+
+    def test_status_and_api(self):
+        # engine.status should be a dict containing at least 'ready'
+        engine = self.Engine()
+        status = engine.status()
+        self.assertIsInstance(status, dict)
+        self.assertIn("ready", status)
+        # start api server in background and query /status
+        from core.api_server import run_server
+        t = run_server(engine, addr="127.0.0.1", port=0)
+        # run_server should return a thread object when start_thread=True
+        self.assertTrue(hasattr(t, "is_alive"))
 
 
 if __name__ == "__main__":

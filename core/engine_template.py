@@ -5,6 +5,7 @@ import torch
 from sentence_transformers import SentenceTransformer, util
 from core.memory import load_memory, save_memory
 from core.embeddings_cache import load_embeddings, save_embeddings, clear_cache
+from core.openai_backend import OpenAIBackend
 
 
 class Responder:
@@ -86,16 +87,100 @@ class SmartResponder(SimpleResponder):
         try:
             inputs = engine.llm_tokenizer(prompt, return_tensors="pt")
             # move tensors to the same device as the model
-            if hasattr(inputs, "to"):
-                inputs = inputs.to(engine.llm_device)
-            # combine generation-specific parameters from engine.llm_params
-            params = dict(engine.llm_params)
-            params.update(inputs)
-            outputs = engine.llm_model.generate(**params)
+            try:
+                model_device = next(engine.llm_model.parameters()).device
+            except Exception:
+                model_device = getattr(engine, "llm_device", "cpu")
+
+            for k, v in inputs.items():
+                try:
+                    inputs[k] = v.to(model_device)
+                except Exception:
+                    pass
+
+            # Prepare generation kwargs with sensible defaults
+            gen_kwargs = {
+                "max_new_tokens": int(engine.llm_params.get("max_new_tokens", 50)),
+                "temperature": float(engine.llm_params.get("temperature", 1.0)),
+                "top_k": int(engine.llm_params.get("top_k", 0)),
+                "top_p": float(engine.llm_params.get("top_p", 1.0)),
+                "do_sample": float(engine.llm_params.get("temperature", 1.0)) > 0,
+            }
+
+            # Ensure a pad token id for some models
+            pad_id = getattr(engine.llm_tokenizer, "pad_token_id", None)
+            if pad_id is None:
+                pad_id = getattr(engine.llm_tokenizer, "eos_token_id", None)
+            if pad_id is not None:
+                gen_kwargs["pad_token_id"] = pad_id
+
+            # Merge any additional gen params supplied via llm_params
+            extra = engine.llm_params.get("extra_gen_kwargs", {})
+            if isinstance(extra, dict):
+                gen_kwargs.update(extra)
+
+            outputs = engine.llm_model.generate(**inputs, **gen_kwargs)
             text = engine.llm_tokenizer.decode(outputs[0], skip_special_tokens=True)
+
+            # Remove prompt prefix if present so we return only the generated completion
+            if text.startswith(prompt):
+                text = text[len(prompt) :]
+
             return text.strip()
         except Exception:  # noqa: BLE001
             return None
+
+    def stream_respond(self, text: str, engine: "Engine", chunk_callback) -> None:
+        """Stream a generated response by invoking the engine's generation
+        in a background thread and calling `chunk_callback(chunk, final=False)`
+        for each chunk and `chunk_callback(chunk, final=True)` when done.
+        """
+        # Short-circuit repetition and plugin handling as in `respond`.
+        if engine.last_user == text:
+            # try to produce a different reply using the LLM if present
+            if engine.llm_model and engine.llm_tokenizer:
+                prompt = self.build_prompt(text, engine) + "\n(Even the same query should get a fresh answer.)"
+                # Run generation in background and stream
+                engine.generate_stream(prompt, chunk_callback)
+                return
+            reply = "You've already said that. Could you expand or change the topic?"
+            engine.record_interaction(text, reply)
+            chunk_callback(reply, True)
+            return
+
+        for plugin in getattr(engine, "plugins", []):
+            try:
+                if plugin.can_handle(text):
+                    result = plugin.handle(text, engine)
+                    if result is not None:
+                        chunk_callback(result, True)
+                        return
+            except Exception:  # pragma: no cover - plugin bugs shouldn't kill us
+                continue
+
+        if engine.embeddings_cache is not None and engine.corpus_texts:
+            try:
+                query_emb = engine._encode(text)
+                hits = util.cos_sim(query_emb, engine.embeddings_cache)
+                score, idx = hits.max(dim=1)
+                if score.item() > engine.similarity_threshold:
+                    previous = engine.corpus_texts[int(idx.item())].strip()
+                    reply = f"I recall you mentioned '{previous}' earlier. Could you tell me more?"
+                    chunk_callback(reply, True)
+                    return
+            except Exception:
+                pass
+
+        # If LLM is configured, stream generation
+        prompt = self.build_prompt(text, engine)
+        if engine.llm_model and engine.llm_tokenizer:
+            # record interaction when final chunk arrives inside engine.generate_stream
+            engine.generate_stream(prompt, chunk_callback, record_user_text=text)
+            return
+
+        # fallback to synchronous responder
+        reply = super().respond(text, engine)
+        chunk_callback(reply, True)
 
     def respond(self, text: str, engine: "Engine") -> str:
         # first, check if the user is repeating the exact same input as last
@@ -151,7 +236,35 @@ class SmartResponder(SimpleResponder):
 
 
 class Engine:
-    def __init__(self):
+    def __init__(self, progress_cb=None):
+        """Engine constructor.
+
+        progress_cb: optional callable(progress: float, message: str)
+        used by the TUI to visualize loading progress.
+        """
+        # housekeeping state
+        self._status = {}
+        self.clarifications_asked = set()
+
+        self._progress_cb = progress_cb
+        # if thesaurus is enabled, make sure WordNet corpora exist now to avoid
+        # delays later during response generation
+        if os.environ.get("EVOAI_USE_THESAURUS", "1").lower() in ("1", "true", "yes"):
+            try:
+                from core.language_utils import ensure_wordnet
+
+                ensure_wordnet()
+            except Exception:
+                pass
+        def _report(frac, msg=""):
+            try:
+                if callable(self._progress_cb):
+                    self._progress_cb(float(frac), str(msg))
+            except Exception:
+                pass
+
+        self._set_status("startup", "begin")
+        _report(0.01, "starting")
         print("Loading model (Intel CPU optimized)...")
         torch.set_num_threads(int(os.environ.get("EVOAI_TORCH_THREADS", "8")))
 
@@ -160,7 +273,12 @@ class Engine:
         # Force CPU device to maintain determinism on Intel Mac
         device = os.environ.get("EVOAI_DEVICE", "cpu")
 
+        self._set_status("config", "loaded")
+
+        _report(0.10, "loading embeddings model")
         self.model = SentenceTransformer(model_name, device=device)
+        _report(0.45, "embeddings model loaded")
+        self._set_status("embeddings_model", "ok")
         # small optimization: cache encode method with convert_to_tensor=True
         self._encode = lambda texts, **k: self.model.encode(
             texts, convert_to_tensor=True, **k
@@ -189,6 +307,7 @@ class Engine:
         # Persistent memory and in-memory embedding cache
         self.memory = load_memory()
         self.corpus_texts = [entry.get("user", "") for entry in self.memory]
+        self._set_status("memory", "loaded")
 
         # Try to load persisted embeddings from disk (keeps consistent with memory)
         self.embeddings_cache = load_embeddings()
@@ -209,6 +328,7 @@ class Engine:
             try:
                 self.embeddings_cache = self._encode(self.corpus_texts)
                 save_embeddings(self.embeddings_cache)
+                _report(0.65, "embeddings cached")
             except Exception:  # noqa: BLE001
                 self.embeddings_cache = None
 
@@ -217,6 +337,8 @@ class Engine:
 
         plugin_dir = os.environ.get("EVOAI_PLUGIN_DIR", "plugins")
         self.plugins = load_plugins(plugin_dir)
+        _report(0.80, "plugins loaded")
+        self._set_status("plugins", "loaded")
 
         # optionally load a text-generation LLM for richer replies
         self.llm_model = None
@@ -251,14 +373,140 @@ class Engine:
                 self.llm_model = None
                 self.llm_tokenizer = None
 
+                _report(0.95, "llm init done")
+
+        # Optional OpenAI ChatGPT backend (used as "backend thinking")
+        self.openai_backend = None
+        try:
+            if os.environ.get("OPENAI_API_KEY"):
+                try:
+                    self.openai_backend = OpenAIBackend()
+                except Exception:
+                    # don't fail construction if OpenAI isn't usable
+                    self.openai_backend = None
+        except Exception:
+            self.openai_backend = None
+
         # choose responder implementation
         responder_mode = os.environ.get("EVOAI_RESPONDER", "simple").lower()
         if responder_mode in ("smart", "auto"):
             self.responder = SmartResponder()
         else:
             self.responder = SimpleResponder()
+        self._set_status("responder", responder_mode)
 
         print("Model loaded.")
+        _report(1.0, "ready")
+        self._set_status("ready", "yes")
+
+        # optionally start REST API
+        if os.environ.get("EVOAI_ENABLE_API", "").lower() in ("1", "true", "yes"):
+            try:
+                from core.api_server import run_server
+
+                addr = os.environ.get("EVOAI_API_ADDR", "127.0.0.1")
+                port = int(os.environ.get("EVOAI_API_PORT", "8000"))
+                run_server(self, addr=addr, port=port)
+                self._set_status("api", "running")
+            except Exception:
+                self._set_status("api", "error")
+
+        # optional network awareness stub (requires explicit user consent)
+        if os.environ.get("EVOAI_ENABLE_NET_SCAN", "").lower() in ("1", "true", "yes", "permitted"):
+            try:
+                from core.network_scanner import scan_local_network
+
+                scan_local_network()
+                self._set_status("network_scan", "noop")
+            except Exception:
+                self._set_status("network_scan", "error")
+
+        # check for optional auto-update URL
+        update_url = os.environ.get("EVOAI_AUTO_UPDATE_URL", "").strip()
+        if update_url:
+            try:
+                from core.auto_updater import safe_run_update
+
+                safe_run_update(update_url)
+            except Exception:
+                pass
+
+    def generate_stream(self, prompt: str, chunk_callback, chunk_size: int = 64, record_user_text: str | None = None):
+        """Generate text in a background thread and call `chunk_callback(chunk, final)`
+        with successive chunks. Implementation uses full-generation then
+        emits the output in slices to provide a streaming UI experience.
+        """
+        # If an OpenAI backend is configured, prefer streaming from it
+        if getattr(self, "openai_backend", None) is not None:
+            try:
+                return self.openai_backend.generate_stream(prompt, chunk_callback, model=os.environ.get("OPENAI_MODEL"))
+            except Exception as e:
+                try:
+                    chunk_callback(f"(openai backend error) {e}", True)
+                except Exception:
+                    pass
+                return None
+
+        import threading
+
+        def _worker():
+            try:
+                # reuse SmartResponder's generator helper by constructing inputs
+                inputs = self.llm_tokenizer(prompt, return_tensors="pt")
+                try:
+                    model_device = next(self.llm_model.parameters()).device
+                except Exception:
+                    model_device = getattr(self, "llm_device", "cpu")
+                for k, v in inputs.items():
+                    try:
+                        inputs[k] = v.to(model_device)
+                    except Exception:
+                        pass
+
+                gen_kwargs = {
+                    "max_new_tokens": int(self.llm_params.get("max_new_tokens", 50)),
+                    "temperature": float(self.llm_params.get("temperature", 1.0)),
+                    "top_k": int(self.llm_params.get("top_k", 0)),
+                    "top_p": float(self.llm_params.get("top_p", 1.0)),
+                    "do_sample": float(self.llm_params.get("temperature", 1.0)) > 0,
+                }
+                extra = self.llm_params.get("extra_gen_kwargs", {})
+                if isinstance(extra, dict):
+                    gen_kwargs.update(extra)
+
+                outputs = self.llm_model.generate(**inputs, **gen_kwargs)
+                text = self.llm_tokenizer.decode(outputs[0], skip_special_tokens=True)
+                # Remove prompt prefix if present
+                if text.startswith(prompt):
+                    text = text[len(prompt) :]
+
+                # Emit in chunks
+                i = 0
+                n = len(text)
+                while i < n:
+                    j = min(i + chunk_size, n)
+                    chunk = text[i:j]
+                    chunk_callback(chunk, False)
+                    i = j
+                # final callback
+                chunk_callback("", True)
+                # record interaction if requested
+                try:
+                    if record_user_text is not None:
+                        # final text is the whole generated output
+                        self.record_interaction(record_user_text, text)
+                except Exception:
+                    pass
+            except Exception as e:
+                # Report error as final chunk
+                try:
+                    chunk_callback(f"(generation error) {e}", True)
+                except Exception:
+                    pass
+
+        t = threading.Thread(target=_worker, daemon=True, name="EvoAI-Gen")
+        t.start()
+        return t
 
     def record_interaction(self, user_text: str, reply: str) -> None:
         """Store a user/assistant turn and update embeddings.
@@ -299,7 +547,41 @@ class Engine:
         # logic centralized and makes the behaviour configurable via
         # ``EVOAI_RESPONDER``.  The responders themselves handle empty input
         # checks and memory updates.
-        return self.responder.respond(text, self)
+        reply = self.responder.respond(text, self)
+
+        # maybe ask for a clarification if the user input seemed vague
+        try:
+            from core import language_utils
+
+            clar, topic = language_utils.clarify_if_ambiguous(text)
+            if clar and topic and topic not in self.clarifications_asked:
+                self.clarifications_asked.add(topic)
+                reply = clar + " " + reply
+        except Exception:
+            pass
+
+        # optionally enhance vocabulary of the reply
+        if os.environ.get("EVOAI_USE_THESAURUS", "1").lower() in ("1", "true", "yes"):
+            try:
+                from core import language_utils
+
+                reply = language_utils.enhance_text(reply)
+            except Exception:
+                pass
+
+        return reply
+
+
+
+    def status(self) -> dict:
+        """Return a snapshot of the engine's internal status dictionary."""
+        return dict(self._status)
+
+    def _set_status(self, key: str, value: str) -> None:
+        try:
+            self._status[key] = value
+        except Exception:
+            pass
 
 
 def handle_exit(sig, frame):

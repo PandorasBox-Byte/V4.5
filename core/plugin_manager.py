@@ -9,6 +9,7 @@ dependencies to keep the core engine lightweight.
 """
 
 import importlib
+import importlib.util
 import os
 import sys
 from typing import List, Optional, Type
@@ -51,29 +52,38 @@ def load_plugins(directory: str = "plugins") -> List[ResearchPlugin]:
     if not os.path.isdir(directory):
         return plugins
 
-    # temporarily add plugin directory for imports
     abs_dir = os.path.abspath(directory)
-    sys.path.insert(0, abs_dir)
+    pkg_name = os.path.basename(abs_dir)
 
-    for fname in os.listdir(abs_dir):
-        if not fname.endswith(".py") or fname.startswith("_"):
-            continue
+    # If the directory is a proper package (has __init__), import modules
+    # as `plugins.<module>`; otherwise fall back to loading by file.
+    files = [f for f in os.listdir(abs_dir) if f.endswith(".py") and not f.startswith("_")]
+    for fname in files:
         mod_name = os.path.splitext(fname)[0]
+        module = None
         try:
-            module = importlib.import_module(mod_name)
+            if os.path.exists(os.path.join(abs_dir, "__init__.py")):
+                module = importlib.import_module(f"{pkg_name}.{mod_name}")
+            else:
+                # load module directly from file without modifying sys.path
+                path = os.path.join(abs_dir, fname)
+                spec = importlib.util.spec_from_file_location(mod_name, path)
+                if spec and spec.loader:
+                    module = importlib.util.module_from_spec(spec)
+                    spec.loader.exec_module(module)
         except Exception:
             # ignore modules that fail to import
+            module = None
+
+        if not module:
             continue
+
         for obj in vars(module).values():
-            if (
-                isinstance(obj, type)
-                and issubclass(obj, ResearchPlugin)
-                and obj is not ResearchPlugin
-            ):
+            if isinstance(obj, type) and issubclass(obj, ResearchPlugin) and obj is not ResearchPlugin:
                 try:
                     instance = obj()
                 except Exception:
                     continue
                 plugins.append(instance)
-    sys.path.pop(0)
+
     return plugins
