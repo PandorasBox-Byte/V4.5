@@ -1,4 +1,32 @@
-EvoAI V4.5
+# EvoAI V4.5
+
+Local semantic assistant using sentence-transformers.
+
+Quick start
+
+1. Activate the virtualenv:
+
+```bash
+source v4env/bin/activate
+```
+
+2. Run the assistant:
+
+```bash
+python launch_v4.py
+```
+
+Configuration
+
+- `MODEL_NAME`: override model (default `all-MiniLM-L6-v2`)
+- `DEVICE`: `cpu` or `cuda`
+- `THREADS`: CPU threads to allocate
+- `DISABLE_MEMORY_SAVE=1`: avoid persisting `data/memory.json`
+
+Notes
+
+- `v4env/` is included in the repository but should be removed from version control; consider recreating your venv with `instaallv4.5.sh`.
+- Large binaries were migrated to Git LFS; collaborators must run `git lfs install` and `git lfs fetch --all`.EvoAI V4.5
 =================
 
 Local, CPU-first EvoAI core runtime (designed for Intel macOS).
