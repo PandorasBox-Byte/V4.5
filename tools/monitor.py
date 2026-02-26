@@ -58,7 +58,10 @@ def main():
             clear()
             now = datetime.datetime.now()
             uptime = int(time.time() - start)
-            loadavg = os.getloadavg() if hasattr(os, "getloadavg") else (0.0, 0.0, 0.0)
+            try:
+                loadavg = os.getloadavg()
+            except Exception:
+                loadavg = (0.0, 0.0, 0.0)
 
             pid = read_pid(args.pidfile)
             if pid:

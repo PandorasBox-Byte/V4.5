@@ -17,6 +17,8 @@ class Engine:
         device = os.environ.get("EVOAI_DEVICE", "cpu")
 
         self.model = SentenceTransformer(model_name, device=device)
+        # small optimization: cache encode method with convert_to_tensor=True
+        self._encode = lambda texts, **k: self.model.encode(texts, convert_to_tensor=True, **k)
 
         # Configuration
         self.similarity_threshold = float(os.environ.get("EVOAI_SIMILARITY_THRESHOLD", "0.7"))
@@ -30,17 +32,18 @@ class Engine:
         self.embeddings_cache = load_embeddings()
         if self.embeddings_cache is not None:
             try:
+                # Ensure cache is on CPU for consistent cos_sim calls
                 self.embeddings_cache = self.embeddings_cache.to("cpu")
             except Exception:
                 pass
-            if self.embeddings_cache.shape[0] != len(self.corpus_texts):
+            if getattr(self.embeddings_cache, "shape", (0,))[0] != len(self.corpus_texts):
                 clear_cache()
                 self.embeddings_cache = None
 
         # If no cache, compute once (best-effort)
         if self.embeddings_cache is None and self.corpus_texts:
             try:
-                self.embeddings_cache = self.model.encode(self.corpus_texts, convert_to_tensor=True)
+                self.embeddings_cache = self._encode(self.corpus_texts)
                 save_embeddings(self.embeddings_cache)
             except Exception:
                 self.embeddings_cache = None
@@ -53,7 +56,7 @@ class Engine:
 
         # Compute query embedding
         try:
-            query_embedding = self.model.encode(text, convert_to_tensor=True)
+            query_embedding = self._encode(text)
         except Exception:
             query_embedding = None
 
@@ -61,7 +64,8 @@ class Engine:
         if query_embedding is not None and self.embeddings_cache is not None and len(self.corpus_texts) > 0:
             try:
                 hits = util.cos_sim(query_embedding, self.embeddings_cache)
-                score, idx = torch.max(hits, dim=1)
+                # hits shape: (1, N) — take max across dim=1
+                score, idx = hits.max(dim=1)
                 if score.item() > self.similarity_threshold:
                     chosen = self.corpus_texts[int(idx.item())].strip()
                     return f"You previously said something similar: '{chosen}'"
@@ -80,9 +84,10 @@ class Engine:
                     query_embedding = query_embedding.unsqueeze(0)
 
                 if self.embeddings_cache is None:
-                    self.embeddings_cache = query_embedding
+                    self.embeddings_cache = query_embedding.cpu().detach()
                 else:
-                    self.embeddings_cache = torch.cat([self.embeddings_cache, query_embedding], dim=0)
+                    # ensure both tensors on CPU to avoid device transfer overhead
+                    self.embeddings_cache = torch.cat([self.embeddings_cache, query_embedding.cpu().detach()], dim=0)
 
                 # Persist cache (best-effort)
                 save_embeddings(self.embeddings_cache)

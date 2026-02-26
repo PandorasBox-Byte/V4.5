@@ -52,6 +52,11 @@ def main():
                 user_input = input("You: ")
             except EOFError:
                 break
+            if user_input is None:
+                break
+            # skip empty inputs quickly
+            if not user_input.strip():
+                continue
             response = engine.respond(user_input)
             print("EvoAI:", response)
     except (KeyboardInterrupt, SystemExit):
