@@ -8,3 +8,6 @@ env/
 venv/
 *.egg-info/
 dist/
+# Large model & data artifacts (keep out of git)
+data/finetuned-model/
+data/embeddings.pt
