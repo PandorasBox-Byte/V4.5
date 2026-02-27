@@ -8,7 +8,7 @@ from core import trainer
 class TrainerTests(unittest.TestCase):
     def setUp(self):
         # cleanup potential output directories
-        for path in ("data/finetuned-model", "data/llm_finetuned"):
+        for path in ("data/finetuned-model", "data/llm_finetuned", "data/decision_policy"):
             if os.path.isdir(path):
                 shutil.rmtree(path)
 
@@ -32,6 +32,20 @@ class TrainerTests(unittest.TestCase):
         out = trainer.train_llm([("hi", "hello")], base_model="dummy", output_dir="data/llm_finetuned")
         self.assertTrue(os.path.isdir(out))
         self.assertTrue(os.path.exists(os.path.join(out, "dummy.txt")))
+
+    def test_train_decision_policy_outputs_artifacts(self):
+        out = trainer.train_decision_policy(
+            [("how do i debug this", "Start with the error output")],
+            output_dir="data/decision_policy",
+            epochs=2,
+            width=64,
+            depth=4,
+        )
+        self.assertTrue(os.path.isdir(out))
+        self.assertTrue(
+            os.path.exists(os.path.join(out, "metadata.json"))
+            or os.path.exists(os.path.join(out, "fallback.json"))
+        )
 
 
 if __name__ == "__main__":

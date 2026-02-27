@@ -1,7 +1,29 @@
 import os
 import unittest
-import torch
 import types
+import io
+from contextlib import redirect_stdout
+import json
+from unittest.mock import patch
+
+
+class _FakeValue:
+    def __init__(self, value):
+        self._value = value
+
+    def item(self):
+        return self._value
+
+
+class _FakeTensor:
+    def __init__(self, values):
+        self._values = values
+
+    def __getitem__(self, idx):
+        value = self._values[idx]
+        if isinstance(value, list) and len(value) == 1 and isinstance(value[0], (int, float)):
+            return _FakeValue(value[0])
+        return value
 
 
 class EngineSmokeTests(unittest.TestCase):
@@ -18,6 +40,11 @@ class EngineSmokeTests(unittest.TestCase):
         self.Engine = Engine
         # clear on-disk state so tests are isolated
         for fname in ("data/memory.json", "data/embeddings.pt"):
+            try:
+                os.remove(fname)
+            except FileNotFoundError:
+                pass
+        for fname in ("data/custom_conversations.json", "data/conversation_capture_meta.json"):
             try:
                 os.remove(fname)
             except FileNotFoundError:
@@ -84,13 +111,13 @@ class EngineSmokeTests(unittest.TestCase):
         captured = {}
         def fake_generate(**kwargs):
             captured.update(kwargs)
-            return torch.tensor([[0]])
+            return _FakeTensor([[0]])
         engine.llm_model = types.SimpleNamespace(
             generate=fake_generate
         )
         class DummyTok:
             def __call__(self, prompt, return_tensors=None):
-                return {"input_ids": torch.tensor([[0]])}
+                return {"input_ids": [[0]]}
             def decode(self, ids, skip_special_tokens=True):
                 return "llm reply"
         engine.llm_tokenizer = DummyTok()
@@ -121,11 +148,11 @@ class EngineSmokeTests(unittest.TestCase):
         counter = {"n": 0}
         def fake_generate(**kwargs):
             counter["n"] += 1
-            return torch.tensor([[counter["n"]]])
+            return _FakeTensor([[counter["n"]]])
         engine.llm_model = types.SimpleNamespace(generate=fake_generate)
         class DummyTok2:
             def __call__(self, prompt, return_tensors=None):
-                return {"input_ids": torch.tensor([[0]])}
+                return {"input_ids": [[0]]}
             def decode(self, ids, skip_special_tokens=True):
                 return f"gen{ids.item()}"
         engine.llm_tokenizer = DummyTok2()
@@ -170,6 +197,129 @@ class EngineSmokeTests(unittest.TestCase):
         t = run_server(engine, addr="127.0.0.1", port=0)
         # run_server should return a thread object when start_thread=True
         self.assertTrue(hasattr(t, "is_alive"))
+
+    def test_loader_mode_engine_init_is_quiet(self):
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            _ = self.Engine(progress_cb=lambda f, m: None)
+        self.assertEqual(buf.getvalue().strip(), "")
+
+    def test_invalid_memory_file_does_not_crash(self):
+        with open("data/memory.json", "w", encoding="utf-8") as f:
+            f.write("{ not-valid-json")
+
+        engine = self.Engine()
+        self.assertEqual(engine.memory, [])
+        self.assertTrue(engine.respond("hello"))
+
+    def test_runtime_memory_and_corpus_stay_bounded(self):
+        prev_max = os.environ.get("EVOAI_MAX_MEMORY")
+        prev_thesaurus = os.environ.get("EVOAI_USE_THESAURUS")
+        os.environ["EVOAI_MAX_MEMORY"] = "4"
+        os.environ["EVOAI_USE_THESAURUS"] = "0"
+        try:
+            engine = self.Engine()
+            for idx in range(12):
+                engine.respond(f"message {idx}")
+
+            self.assertLessEqual(len(engine.memory), 4)
+            self.assertLessEqual(len(engine.corpus_texts), 2)
+        finally:
+            if prev_max is None:
+                os.environ.pop("EVOAI_MAX_MEMORY", None)
+            else:
+                os.environ["EVOAI_MAX_MEMORY"] = prev_max
+            if prev_thesaurus is None:
+                os.environ.pop("EVOAI_USE_THESAURUS", None)
+            else:
+                os.environ["EVOAI_USE_THESAURUS"] = prev_thesaurus
+
+    def test_decision_layer_status_fields_present(self):
+        engine = self.Engine()
+        status = engine.status()
+        self.assertIn("decision_layer", status)
+        self.assertIn("decision_depth", status)
+        self.assertIn("decision_width", status)
+
+    def test_decision_layer_can_be_disabled(self):
+        prev = os.environ.get("EVOAI_ENABLE_DECISION_LAYER")
+        os.environ["EVOAI_ENABLE_DECISION_LAYER"] = "0"
+        try:
+            engine = self.Engine()
+            status = engine.status()
+            self.assertEqual(status.get("decision_layer"), "disabled")
+            self.assertTrue(engine.respond("hello"))
+        finally:
+            if prev is None:
+                os.environ.pop("EVOAI_ENABLE_DECISION_LAYER", None)
+            else:
+                os.environ["EVOAI_ENABLE_DECISION_LAYER"] = prev
+
+    def test_decision_model_path_status_present(self):
+        os.makedirs("data/decision_policy", exist_ok=True)
+        with open("data/decision_policy/metadata.json", "w", encoding="utf-8") as f:
+            json.dump({"ok": True}, f)
+        prev = os.environ.get("EVOAI_DECISION_MODEL_PATH")
+        os.environ["EVOAI_DECISION_MODEL_PATH"] = "data/decision_policy/model.pt"
+        try:
+            engine = self.Engine()
+            status = engine.status()
+            self.assertIn("decision_model_path", status)
+            self.assertIn("decision_model_loaded", status)
+        finally:
+            if prev is None:
+                os.environ.pop("EVOAI_DECISION_MODEL_PATH", None)
+            else:
+                os.environ["EVOAI_DECISION_MODEL_PATH"] = prev
+
+    def test_external_backend_conversation_and_capture(self):
+        prev_responder = os.environ.get("EVOAI_RESPONDER")
+        prev_thesaurus = os.environ.get("EVOAI_USE_THESAURUS")
+        prev_copilot = os.environ.get("EVOAI_COPILOT_CHAT")
+        try:
+            os.environ["EVOAI_RESPONDER"] = "smart"
+            os.environ["EVOAI_USE_THESAURUS"] = "0"
+            os.environ["EVOAI_COPILOT_CHAT"] = "1"
+
+            engine = self.Engine()
+
+            class DummyExternal:
+                def generate_sync(self, prompt, model=None, **kwargs):
+                    return "External detailed response with actionable debugging steps"
+
+            engine.external_backend = DummyExternal()
+            reply = engine.respond("Please help me debug this issue deeply")
+            self.assertIn("External detailed response", reply)
+
+            self.assertTrue(os.path.exists("data/custom_conversations.json"))
+            with open("data/custom_conversations.json", "r", encoding="utf-8") as f:
+                rows = json.load(f)
+            self.assertTrue(any(isinstance(r, list) and len(r) == 2 for r in rows))
+
+            self.assertTrue(os.path.exists("data/conversation_capture_meta.json"))
+            with open("data/conversation_capture_meta.json", "r", encoding="utf-8") as f:
+                meta = json.load(f)
+            self.assertGreaterEqual(int(meta.get("new_samples_since_train", 0)), 1)
+        finally:
+            if prev_responder is None:
+                os.environ.pop("EVOAI_RESPONDER", None)
+            else:
+                os.environ["EVOAI_RESPONDER"] = prev_responder
+            if prev_thesaurus is None:
+                os.environ.pop("EVOAI_USE_THESAURUS", None)
+            else:
+                os.environ["EVOAI_USE_THESAURUS"] = prev_thesaurus
+            if prev_copilot is None:
+                os.environ.pop("EVOAI_COPILOT_CHAT", None)
+            else:
+                os.environ["EVOAI_COPILOT_CHAT"] = prev_copilot
+
+    def test_natural_language_self_test_triggers_checks(self):
+        engine = self.Engine()
+        with patch("core.self_repair.SelfRepair.run_tests", return_value=(True, "ok")) as mock_run_tests:
+            response = engine.respond("can you test yourself and run diagnostics now?")
+        mock_run_tests.assert_called_once()
+        self.assertTrue("self-test" in response.lower() or "diagnostic" in response.lower())
 
 
 if __name__ == "__main__":

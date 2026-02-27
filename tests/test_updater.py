@@ -5,14 +5,14 @@ import socketserver
 import tempfile
 import threading
 import unittest
+from functools import partial
 
 from core import auto_updater
 
 
 def _serve_directory(directory):
     # start a simple HTTP server serving *directory*, return (thread, port, server)
-    handler = http.server.SimpleHTTPRequestHandler
-    os.chdir(directory)
+    handler = partial(http.server.SimpleHTTPRequestHandler, directory=directory)
     srv = socketserver.TCPServer(("", 0), handler)
     port = srv.server_address[1]
     thread = threading.Thread(target=srv.serve_forever, daemon=True)
@@ -62,6 +62,7 @@ class UpdaterTests(unittest.TestCase):
             f.write("original\n")
         if hasattr(self, "server_instance"):
             self.server_instance.shutdown()
+            self.server_instance.server_close()
 
     def test_run_update_flow_user_declines(self):
         # patch input to simulate user pressing n

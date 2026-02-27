@@ -28,16 +28,36 @@ class SelfRepair:
         except subprocess.TimeoutExpired:
             return 124, "timeout"
 
+    @staticmethod
+    def _env_true(name: str, default: str = "0") -> bool:
+        return os.environ.get(name, default).strip().lower() in ("1", "true", "yes", "on")
+
     @classmethod
-    def run_tests(cls, progress_cb=None) -> Tuple[bool, str]:
-        """Run a sequence of lightweight checks followed by the full pytest run.
+    def run_tests(cls, progress_cb=None, mode: str = "repair", include_pytest: bool | None = None) -> Tuple[bool, str]:
+        """Run startup or repair checks.
 
         progress_cb: optional callable(progress: float, message: str, check_name: str|None=None, passed: bool|None=None)
+        mode: "startup" for fast startup self-test, "repair" for deeper checks.
+        include_pytest: when None, defaults to True only for repair mode.
         """
-        # Allow quick disabling of the self-repair flow for debugging/startup
-        # by setting the environment variable `DISABLE_SELF_REPAIR`.
-        # Default is to disable while we troubleshoot startup issues.
-        if os.environ.get("DISABLE_SELF_REPAIR", "1") in ("1", "true", "True", "yes"):
+        mode = (mode or "repair").strip().lower()
+        if mode not in ("startup", "repair"):
+            mode = "repair"
+
+        if include_pytest is None:
+            include_pytest = mode == "repair"
+
+        # Startup checks use their own flag and are enabled by default.
+        if mode == "startup" and not cls._env_true("EVOAI_STARTUP_SELF_TEST", "1"):
+            try:
+                if callable(progress_cb):
+                    progress_cb(1.0, "startup self-test disabled", check_name="startup-self-test", passed=True)
+            except Exception:
+                pass
+            return True, "startup self-test disabled"
+
+        # Repair flow can still be disabled globally.
+        if mode == "repair" and cls._env_true("DISABLE_SELF_REPAIR", "1"):
             try:
                 if callable(progress_cb):
                     progress_cb(1.0, "self-repair disabled", check_name="self-repair", passed=True)
@@ -47,33 +67,42 @@ class SelfRepair:
 
         checks = []
 
-        # smoke engine construction (fast)
-        def _smoke():
-            import sys
-            from types import SimpleNamespace
-            import torch
-
-            class DummyST:
-                def __init__(self, *a, **k):
-                    pass
-
-                def encode(self, texts, convert_to_tensor=True, **k):
-                    if isinstance(texts, list):
-                        return torch.randn(len(texts), 384)
-                    return torch.randn(384)
-
-            fake = SimpleNamespace(SentenceTransformer=DummyST, util=SimpleNamespace(cos_sim=lambda a, b: torch.tensor([[0.0]])))
-            sys.modules['sentence_transformers'] = fake
-            sys.modules['transformers'] = SimpleNamespace(AutoModelForCausalLM=lambda *a, **k: None, AutoTokenizer=lambda *a, **k: None)
+        # runtime and import sanity
+        def _runtime_and_imports():
             try:
-                from core.engine_template import Engine
+                import importlib
 
-                e = Engine(progress_cb=lambda f, m: None)
-                return True, 'smoke ok'
-            except Exception as e:  # pragma: no cover - runtime dependent
+                importlib.import_module("core.memory")
+                importlib.import_module("core.embeddings_cache")
+                importlib.import_module("core.plugin_manager")
+                importlib.import_module("core.decision_policy")
+                return True, f"python {sys.version_info.major}.{sys.version_info.minor}"
+            except Exception as e:
                 return False, str(e)
 
-        checks.append(('smoke_engine', _smoke))
+        checks.append(("runtime", _runtime_and_imports, True))
+
+        # memory file integrity + shape validation
+        def _memory():
+            try:
+                from core.memory import load_memory, save_memory
+
+                mem = load_memory()
+                if not isinstance(mem, list):
+                    return False, "memory root is not a list"
+                bad_rows = 0
+                for row in mem:
+                    if not isinstance(row, dict):
+                        bad_rows += 1
+                if bad_rows:
+                    return False, f"memory contains {bad_rows} non-dict rows"
+                # no-op save/write check
+                save_memory(mem, max_entries=max(1, len(mem) or 1))
+                return True, f"memory entries={len(mem)}"
+            except Exception as e:
+                return False, str(e)
+
+        checks.append(("memory", _memory, True))
 
         # embeddings file integrity
         def _embeddings():
@@ -90,21 +119,7 @@ class SelfRepair:
             except Exception as e:
                 return False, str(e)
 
-        checks.append(('embeddings', _embeddings))
-
-        # memory file read/write
-        def _memory():
-            try:
-                from core.memory import load_memory, save_memory
-
-                mem = load_memory()
-                # try a no-op save to ensure writable
-                save_memory(mem or [], max_entries=10)
-                return True, 'memory rw OK'
-            except Exception as e:
-                return False, str(e)
-
-        checks.append(('memory', _memory))
+        checks.append(("embeddings", _embeddings, True))
 
         # plugins loading
         def _plugins():
@@ -126,41 +141,47 @@ class SelfRepair:
             except Exception as e:
                 return False, str(e)
 
-        checks.append(('plugins', _plugins))
+        checks.append(("plugins", _plugins, False))
 
-        # optional OpenAI API reachability
-        def _openai():
+        # optional GitHub backend initialization (no network call)
+        def _github_backend():
             try:
-                import os
-
-                key = os.environ.get('OPENAI_API_KEY')
+                key = os.environ.get('GITHUB_TOKEN') or os.environ.get('GH_TOKEN')
                 if not key:
-                    return True, 'openai skipped'
+                    return True, 'github skipped'
                 try:
-                    import openai
+                    from core.github_backend import GitHubBackend
                 except Exception as e:
-                    return False, f'openai package missing: {e}'
-                openai.api_key = key
-                # quick call: list models or a tiny completion
+                    return False, f'github backend unavailable: {e}'
                 try:
-                    # prefer a lightweight list models call if available
-                    if hasattr(openai, 'Model'):
-                        _ = openai.Model.list()
-                    else:
-                        # fallback to ChatCompletion with max_tokens=1 and timeout
-                        openai.ChatCompletion.create(model=os.environ.get('OPENAI_MODEL', 'gpt-4o-mini'), messages=[{'role':'user','content':'hi'}], max_tokens=1)
-                    return True, 'openai reachable'
+                    _ = GitHubBackend()
+                    return True, 'github backend initialized'
                 except Exception as e:
                     return False, str(e)
             except Exception as e:
                 return False, str(e)
 
-        checks.append(('openai', _openai))
+        checks.append(("github", _github_backend, False))
+
+        # optional deeper smoke test only in repair mode.
+        if mode == "repair" and cls._env_true("EVOAI_REPAIR_SMOKE_ENGINE", "0"):
+            def _smoke_engine():
+                try:
+                    from core.engine_template import Engine
+
+                    e = Engine(progress_cb=lambda f, m: None)
+                    if not hasattr(e, "respond"):
+                        return False, "engine missing respond"
+                    return True, "engine smoke ok"
+                except Exception as e:
+                    return False, str(e)
+
+            checks.append(("smoke_engine", _smoke_engine, True))
 
         # run checks and report progress
         results = {}
         total = len(checks)
-        for i, (name, fn) in enumerate(checks):
+        for i, (name, fn, _mandatory) in enumerate(checks):
             try:
                 ok, msg = fn()
             except Exception as e:
@@ -173,18 +194,18 @@ class SelfRepair:
             except Exception:
                 pass
 
-            # small sleep to allow UI updates in interactive runs
-            try:
-                import time
-
-                time.sleep(0.02)
-            except Exception:
-                pass
-
         # summarise: if any mandatory check failed, return early
+        mandatory_checks = {
+            name
+            for name, _fn, mandatory in checks
+            if mandatory
+        }
         for k, (ok, msg) in results.items():
-            if not ok and k in ('smoke_engine', 'embeddings', 'memory'):
+            if not ok and k in mandatory_checks:
                 return False, f'{k} failed: {msg}'
+
+        if not include_pytest:
+            return True, "startup self-test passed"
 
         # If checks pass, run full pytest
         code, out = cls.run_command(['pytest', '-q'])

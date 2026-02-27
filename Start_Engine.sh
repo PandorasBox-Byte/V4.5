@@ -7,7 +7,7 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd)"
 cd "$REPO_ROOT"
 
-# Source persisted env file if present (created by scripts/persist_openai_key.sh)
+# Source persisted env file if present (created by scripts/persist_github_token.sh)
 if [ -f "$HOME/.evoai_env" ]; then
   # shellcheck disable=SC1090
   source "$HOME/.evoai_env"
@@ -50,6 +50,18 @@ fi
 
 # Export PYTHONPATH so the package loads from the repo root
 export PYTHONPATH="$REPO_ROOT"
+
+# Auto-select available local models so users do not need manual switching.
+export EVOAI_AUTO_MODEL_DISCOVERY="${EVOAI_AUTO_MODEL_DISCOVERY:-1}"
+export EVOAI_FINETUNED_MODEL_CANDIDATES="${EVOAI_FINETUNED_MODEL_CANDIDATES:-$REPO_ROOT/data/finetuned-model:$REPO_ROOT/data/llm_finetuned_debug}"
+export EVOAI_LLM_MODEL_CANDIDATES="${EVOAI_LLM_MODEL_CANDIDATES:-$REPO_ROOT/data/llm_finetuned:$REPO_ROOT/data/llm_finetuned_debug}"
+
+# Stable runtime defaults.
+export EVOAI_RESPONDER="${EVOAI_RESPONDER:-smart}"
+export EVOAI_USE_THESAURUS="${EVOAI_USE_THESAURUS:-0}"
+export EVOAI_STARTUP_STDOUT_LOGS="${EVOAI_STARTUP_STDOUT_LOGS:-0}"
+export EVOAI_BACKEND_PROVIDER="${EVOAI_BACKEND_PROVIDER:-github}"
+export EVOAI_FORCE_TUI="${EVOAI_FORCE_TUI:-1}"
 
 echo "Starting EvoAI launcher (TUI if available). Press q or Ctrl-C to quit."
 

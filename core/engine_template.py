@@ -1,11 +1,71 @@
 import os
 import signal
 import sys
-import torch
-from sentence_transformers import SentenceTransformer, util
-from core.memory import load_memory, save_memory
+import math
+import json
+import time
+from typing import List
+
+try:
+    import torch
+except Exception:  # pragma: no cover - optional dependency
+    torch = None
+
+try:
+    from sentence_transformers import SentenceTransformer, util
+except Exception:  # pragma: no cover - optional dependency
+    SentenceTransformer = None
+
+    class _CosResult:
+        def __init__(self, scores):
+            self.scores = scores
+
+        def max(self, dim=1):
+            if not self.scores:
+                return _Num(0.0), _Num(0)
+            best_idx = max(range(len(self.scores)), key=lambda i: self.scores[i])
+            return _Num(float(self.scores[best_idx])), _Num(int(best_idx))
+
+    class _Num:
+        def __init__(self, value):
+            self.value = value
+
+        def item(self):
+            return self.value
+
+    class _UtilFallback:
+        @staticmethod
+        def cos_sim(query_embedding, corpus_embeddings):
+            q = list(query_embedding) if isinstance(query_embedding, (list, tuple)) else []
+            rows = corpus_embeddings if isinstance(corpus_embeddings, list) else []
+            qnorm = math.sqrt(sum(v * v for v in q)) or 1.0
+            scores = []
+            for row in rows:
+                r = list(row) if isinstance(row, (list, tuple)) else []
+                rnorm = math.sqrt(sum(v * v for v in r)) or 1.0
+                dot = sum((a * b) for a, b in zip(q, r))
+                scores.append(dot / (qnorm * rnorm))
+            return _CosResult(scores)
+
+    util = _UtilFallback()
+from core.memory import load_memory, save_memory, prune_memory
 from core.embeddings_cache import load_embeddings, save_embeddings, clear_cache
-from core.openai_backend import OpenAIBackend
+from core.github_backend import GitHubBackend
+from core.decision_policy import DecisionPolicy
+
+
+def _path_candidates(raw: str | None) -> List[str]:
+    if not raw:
+        return []
+    parts = [p.strip() for p in raw.split(":")]
+    return [p for p in parts if p]
+
+
+def _resolve_local_or_name(candidates: List[str]) -> str | None:
+    for name in candidates:
+        if os.path.isdir(name):
+            return os.path.abspath(name)
+    return candidates[0] if candidates else None
 
 
 class Responder:
@@ -153,6 +213,7 @@ class SmartResponder(SimpleResponder):
                 if plugin.can_handle(text):
                     result = plugin.handle(text, engine)
                     if result is not None:
+                        engine.record_interaction(text, str(result))
                         chunk_callback(result, True)
                         return
             except Exception:  # pragma: no cover - plugin bugs shouldn't kill us
@@ -166,6 +227,7 @@ class SmartResponder(SimpleResponder):
                 if score.item() > engine.similarity_threshold:
                     previous = engine.corpus_texts[int(idx.item())].strip()
                     reply = f"I recall you mentioned '{previous}' earlier. Could you tell me more?"
+                    engine.record_interaction(text, reply)
                     chunk_callback(reply, True)
                     return
             except Exception:
@@ -203,6 +265,7 @@ class SmartResponder(SimpleResponder):
                 if plugin.can_handle(text):
                     result = plugin.handle(text, engine)
                     if result is not None:
+                        engine.record_interaction(text, str(result))
                         return result
             except Exception:  # pragma: no cover - plugin bugs shouldn't kill us
                 continue
@@ -215,10 +278,12 @@ class SmartResponder(SimpleResponder):
                 score, idx = hits.max(dim=1)
                 if score.item() > engine.similarity_threshold:
                     previous = engine.corpus_texts[int(idx.item())].strip()
-                    return (
+                    reply = (
                         f"I recall you mentioned '{previous}' earlier. "
                         "Could you tell me more?"
                     )
+                    engine.record_interaction(text, reply)
+                    return reply
             except Exception:  # noqa: BLE001
                 pass
 
@@ -265,24 +330,123 @@ class Engine:
 
         self._set_status("startup", "begin")
         _report(0.01, "starting")
-        print("Loading model (Intel CPU optimized)...")
-        torch.set_num_threads(int(os.environ.get("EVOAI_TORCH_THREADS", "8")))
 
-        # allow previously fine-tuned model to override the base name
-        model_name = os.environ.get("EVOAI_FINETUNED_MODEL") or os.environ.get("EVOAI_MODEL", "all-MiniLM-L6-v2")
+        # Avoid writing startup logs directly to stdout when running under the
+        # TUI loader, because it can corrupt the curses screen.
+        self._startup_quiet = callable(progress_cb) and os.environ.get(
+            "EVOAI_STARTUP_STDOUT_LOGS", "0"
+        ).lower() not in ("1", "true", "yes")
+
+        def _startup_log(msg: str) -> None:
+            if self._startup_quiet:
+                return
+            try:
+                print(msg)
+            except Exception:
+                pass
+
+        _startup_log("Loading model (Intel CPU optimized)...")
+        if torch is not None:
+            try:
+                torch.set_num_threads(int(os.environ.get("EVOAI_TORCH_THREADS", "8")))
+            except Exception:
+                pass
+
+        auto_discovery = os.environ.get("EVOAI_AUTO_MODEL_DISCOVERY", "1").lower() in (
+            "1",
+            "true",
+            "yes",
+        )
+
+        # allow previously fine-tuned model to override the base name, with
+        # optional auto-discovery fallback through common local model dirs.
+        emb_candidates: List[str] = []
+        emb_primary = os.environ.get("EVOAI_FINETUNED_MODEL", "").strip()
+        if emb_primary:
+            emb_candidates.append(emb_primary)
+        emb_candidates.extend(_path_candidates(os.environ.get("EVOAI_FINETUNED_MODEL_CANDIDATES")))
+        if auto_discovery:
+            emb_candidates.extend(
+                [
+                    os.path.join("data", "finetuned-model"),
+                    os.path.join("data", "llm_finetuned"),
+                    os.path.join("data", "llm_finetuned_debug"),
+                ]
+            )
+        emb_candidates.append(os.environ.get("EVOAI_MODEL", "all-MiniLM-L6-v2"))
+        model_name = _resolve_local_or_name(emb_candidates) or "all-MiniLM-L6-v2"
+        self._set_status("embeddings_selected", str(model_name))
         # Force CPU device to maintain determinism on Intel Mac
         device = os.environ.get("EVOAI_DEVICE", "cpu")
 
         self._set_status("config", "loaded")
 
+        self.decision_policy = DecisionPolicy()
+        self.decision_max_proactive_per_turn = int(
+            os.environ.get("EVOAI_DECISION_MAX_PROACTIVE_PER_TURN", "2")
+        )
+        self.decision_autonomy_cooldown = int(
+            os.environ.get("EVOAI_DECISION_AUTONOMY_COOLDOWN", "2")
+        )
+        self._turns_since_proactive = self.decision_autonomy_cooldown
+        self._set_status("decision_layer", "enabled" if self.decision_policy.enabled else "disabled")
+        self._set_status("decision_depth", str(self.decision_policy.depth))
+        self._set_status("decision_width", str(self.decision_policy.width))
+        self._set_status("decision_model_loaded", str(self.decision_policy.model_loaded).lower())
+        self._set_status("decision_model_path", str(self.decision_policy.model_path))
+
         _report(0.10, "loading embeddings model")
-        self.model = SentenceTransformer(model_name, device=device)
+        if SentenceTransformer is not None:
+            self.model = None
+            seen = set()
+            for candidate in emb_candidates:
+                if not candidate or candidate in seen:
+                    continue
+                seen.add(candidate)
+                resolved = os.path.abspath(candidate) if os.path.isdir(candidate) else candidate
+                try:
+                    self.model = SentenceTransformer(resolved, device=device)
+                    model_name = resolved
+                    break
+                except Exception:
+                    continue
+
+            if self.model is not None:
+                self._encode = lambda texts, **k: self.model.encode(
+                    texts, convert_to_tensor=True, **k
+                )
+            else:
+                def _fallback_encode(texts, **k):
+                    if isinstance(texts, str):
+                        text = texts
+                    elif isinstance(texts, list):
+                        return [_fallback_encode(t) for t in texts]
+                    else:
+                        text = str(texts)
+                    vec = [0.0] * 16
+                    for idx, ch in enumerate(text.lower()):
+                        vec[idx % 16] += (ord(ch) % 31) / 31.0
+                    return vec
+
+                self._encode = _fallback_encode
+        else:
+            self.model = None
+
+            def _fallback_encode(texts, **k):
+                if isinstance(texts, str):
+                    text = texts
+                elif isinstance(texts, list):
+                    return [_fallback_encode(t) for t in texts]
+                else:
+                    text = str(texts)
+                vec = [0.0] * 16
+                for idx, ch in enumerate(text.lower()):
+                    vec[idx % 16] += (ord(ch) % 31) / 31.0
+                return vec
+
+            self._encode = _fallback_encode
         _report(0.45, "embeddings model loaded")
         self._set_status("embeddings_model", "ok")
-        # small optimization: cache encode method with convert_to_tensor=True
-        self._encode = lambda texts, **k: self.model.encode(
-            texts, convert_to_tensor=True, **k
-        )
 
         # Configuration
         self.similarity_threshold = float(
@@ -344,8 +508,23 @@ class Engine:
         self.llm_model = None
         self.llm_tokenizer = None
         self.llm_device = device
-        llm_name = os.environ.get("EVOAI_LLM_MODEL", "").strip()
-        if llm_name:
+        llm_candidates: List[str] = []
+        llm_primary = os.environ.get("EVOAI_LLM_MODEL", "").strip()
+        if llm_primary:
+            llm_candidates.append(llm_primary)
+        llm_candidates.extend(_path_candidates(os.environ.get("EVOAI_LLM_MODEL_CANDIDATES")))
+        if auto_discovery:
+            llm_candidates.extend(
+                [
+                    os.path.join("data", "llm_finetuned"),
+                    os.path.join("data", "llm_finetuned_debug"),
+                ]
+            )
+
+        for cand in llm_candidates:
+            llm_name = os.path.abspath(cand) if os.path.isdir(cand) else cand
+            if not llm_name:
+                continue
             try:
                 # allow a simple "dummy" value for tests or stubs
                 if llm_name == "dummy":
@@ -356,36 +535,51 @@ class Engine:
                     class _DummyModel:
                         def generate(self, **kwargs):
                             # return a tensor of shape (1,1) for simplicity
-                            return torch.tensor([[0]])
+                            if torch is not None:
+                                return torch.tensor([[0]])
+                            return [[0]]
 
                     self.llm_model = _DummyModel()
                     self.llm_tokenizer = types.SimpleNamespace(
-                        __call__=lambda prompt, return_tensors=None: {"input_ids": torch.tensor([[0]])},
+                        __call__=lambda prompt, return_tensors=None: {"input_ids": torch.tensor([[0]]) if torch is not None else [[0]]},
                         decode=lambda ids, skip_special_tokens=True: ""
                     )
+                    self._set_status("llm_selected", "dummy")
+                    break
                 else:
                     from transformers import AutoModelForCausalLM, AutoTokenizer
 
                     self.llm_tokenizer = AutoTokenizer.from_pretrained(llm_name)
                     self.llm_model = AutoModelForCausalLM.from_pretrained(llm_name).to(device)
+                    self._set_status("llm_selected", str(llm_name))
+                    break
             except Exception:
                 # if loading fails, just operate without LLM
                 self.llm_model = None
                 self.llm_tokenizer = None
+                continue
 
-                _report(0.95, "llm init done")
+        _report(0.95, "llm init done")
 
-        # Optional OpenAI ChatGPT backend (used as "backend thinking")
-        self.openai_backend = None
+        # Optional external backend (GitHub Models by default).
+        self.external_backend = None
+        backend_provider = os.environ.get("EVOAI_BACKEND_PROVIDER", "github").strip().lower()
+        self._set_status("backend_provider", backend_provider)
+        self._set_status("backend_active", "false")
+        self._set_status(
+            "copilot_chat_enabled",
+            "true" if os.environ.get("EVOAI_COPILOT_CHAT", "1").lower() in ("1", "true", "yes") else "false",
+        )
         try:
-            if os.environ.get("OPENAI_API_KEY"):
-                try:
-                    self.openai_backend = OpenAIBackend()
-                except Exception:
-                    # don't fail construction if OpenAI isn't usable
-                    self.openai_backend = None
+            if backend_provider == "github":
+                if os.environ.get("GITHUB_TOKEN") or os.environ.get("GH_TOKEN"):
+                    try:
+                        self.external_backend = GitHubBackend()
+                        self._set_status("backend_active", "true")
+                    except Exception:
+                        self.external_backend = None
         except Exception:
-            self.openai_backend = None
+            self.external_backend = None
 
         # choose responder implementation
         responder_mode = os.environ.get("EVOAI_RESPONDER", "simple").lower()
@@ -395,7 +589,7 @@ class Engine:
             self.responder = SimpleResponder()
         self._set_status("responder", responder_mode)
 
-        print("Model loaded.")
+        _startup_log("Model loaded.")
         _report(1.0, "ready")
         self._set_status("ready", "yes")
 
@@ -431,18 +625,195 @@ class Engine:
             except Exception:
                 pass
 
+    def _build_external_prompt(self, text: str) -> str:
+        recent = self.memory[-8:]
+        parts = ["You are EvoAI, a helpful assistant. Be clear, practical, and context-aware."]
+        for entry in recent:
+            if not isinstance(entry, dict):
+                continue
+            if entry.get("user"):
+                parts.append(f"User: {entry.get('user')}")
+            elif entry.get("assistant"):
+                parts.append(f"Assistant: {entry.get('assistant')}")
+        parts.append(f"User: {text}")
+        parts.append("Assistant:")
+        return "\n".join(parts)
+
+    def _should_capture_for_training(self, user_text: str, reply: str) -> bool:
+        user_words = len((user_text or "").strip().split())
+        reply_words = len((reply or "").strip().split())
+        if user_words < 3 or reply_words < 4:
+            return False
+        if (reply or "").lower().startswith("(error)"):
+            return False
+        if "no token provided" in (reply or "").lower():
+            return False
+        return True
+
+    def _append_training_conversation(self, user_text: str, reply: str) -> None:
+        if not self._should_capture_for_training(user_text, reply):
+            return
+
+        data_path = os.environ.get("EVOAI_TRAINING_DATA_PATH", os.path.join("data", "custom_conversations.json"))
+        meta_path = os.environ.get(
+            "EVOAI_TRAINING_META_PATH",
+            os.path.join("data", "conversation_capture_meta.json"),
+        )
+        max_rows = int(os.environ.get("EVOAI_TRAINING_MAX_ROWS", "5000"))
+
+        rows = []
+        try:
+            if os.path.exists(data_path):
+                with open(data_path, "r", encoding="utf-8") as f:
+                    existing = json.load(f)
+                if isinstance(existing, list):
+                    rows = existing
+        except Exception:
+            rows = []
+
+        rows.append([str(user_text), str(reply)])
+        if max_rows > 0 and len(rows) > max_rows:
+            rows = rows[-max_rows:]
+
+        os.makedirs(os.path.dirname(data_path), exist_ok=True)
+        with open(data_path, "w", encoding="utf-8") as f:
+            json.dump(rows, f, ensure_ascii=False, indent=2)
+
+        meta = {
+            "new_samples_since_train": 0,
+            "total_captured": 0,
+            "last_capture_ts": 0,
+        }
+        try:
+            if os.path.exists(meta_path):
+                with open(meta_path, "r", encoding="utf-8") as f:
+                    existing_meta = json.load(f)
+                if isinstance(existing_meta, dict):
+                    meta.update(existing_meta)
+        except Exception:
+            pass
+
+        meta["new_samples_since_train"] = int(meta.get("new_samples_since_train", 0)) + 1
+        meta["total_captured"] = int(meta.get("total_captured", 0)) + 1
+        meta["last_capture_ts"] = int(time.time())
+
+        os.makedirs(os.path.dirname(meta_path), exist_ok=True)
+        with open(meta_path, "w", encoding="utf-8") as f:
+            json.dump(meta, f, ensure_ascii=False, indent=2)
+
+    def _try_external_conversation_reply(self, text: str) -> str | None:
+        if os.environ.get("EVOAI_COPILOT_CHAT", "1").lower() not in ("1", "true", "yes"):
+            return None
+        if getattr(self, "external_backend", None) is None:
+            return None
+        try:
+            prompt = self._build_external_prompt(text)
+            model_name = os.environ.get("GITHUB_MODEL")
+            reply = self.external_backend.generate_sync(prompt, model=model_name)
+            if reply and str(reply).strip():
+                self._set_status("backend_last", "success")
+                return str(reply).strip()
+        except Exception as e:
+            self._set_status("backend_last", f"error:{e}")
+        return None
+
+    def _is_self_test_request(self, text: str) -> bool:
+        lowered = (text or "").strip().lower()
+        if not lowered:
+            return False
+        intents = (
+            "test yourself",
+            "self test",
+            "self-test",
+            "run diagnostics",
+            "diagnostic",
+            "health check",
+            "check yourself",
+            "check all functions",
+            "test all functions",
+            "test all features",
+            "full check",
+            "system check",
+        )
+        return any(token in lowered for token in intents)
+
+    def _humanize_self_test_result(self, ok: bool, brief: str) -> str:
+        fallback = (
+            "Self-test complete. Everything looks healthy and functional."
+            if ok
+            else f"Self-test found issues: {brief}. I can help you troubleshoot step by step."
+        )
+        if os.environ.get("EVOAI_COPILOT_NATURALIZE", "1").lower() not in ("1", "true", "yes"):
+            return fallback
+        if getattr(self, "external_backend", None) is None:
+            return fallback
+        try:
+            model_name = os.environ.get("GITHUB_MODEL")
+            prompt = (
+                "You are EvoAI. Write one short, human, supportive status update for a completed self-test. "
+                f"Result ok={ok}. Summary: {brief}. Keep it under 35 words."
+            )
+            text = self.external_backend.generate_sync(prompt, model=model_name)
+            if text and str(text).strip():
+                return str(text).strip()
+        except Exception:
+            pass
+        return fallback
+
+    def run_self_test(self, progress_cb=None) -> str:
+        from core.self_repair import SelfRepair
+
+        run_full = os.environ.get("EVOAI_SELF_TEST_FULL", "0").lower() in ("1", "true", "yes")
+        ok, out = SelfRepair.run_tests(
+            progress_cb=progress_cb,
+            mode="repair",
+            include_pytest=run_full,
+        )
+        brief = "all checks passed" if ok else (str(out).strip().splitlines()[-1] if out else "unknown error")
+        mode_text = "full suite" if run_full else "fast diagnostics"
+        human = self._humanize_self_test_result(ok, f"{brief} ({mode_text})")
+        return f"{human} (self-test: {mode_text})"
+
+    def try_handle_autonomous_request(self, text: str, progress_cb=None) -> str | None:
+        if not self._is_self_test_request(text):
+            return None
+        reply = self.run_self_test(progress_cb=progress_cb)
+        try:
+            self.record_interaction(str(text), reply)
+        except Exception:
+            pass
+        return reply
+
     def generate_stream(self, prompt: str, chunk_callback, chunk_size: int = 64, record_user_text: str | None = None):
         """Generate text in a background thread and call `chunk_callback(chunk, final)`
         with successive chunks. Implementation uses full-generation then
         emits the output in slices to provide a streaming UI experience.
         """
-        # If an OpenAI backend is configured, prefer streaming from it
-        if getattr(self, "openai_backend", None) is not None:
+        # If an external backend is configured, prefer streaming from it.
+        if getattr(self, "external_backend", None) is not None:
             try:
-                return self.openai_backend.generate_stream(prompt, chunk_callback, model=os.environ.get("OPENAI_MODEL"))
+                model_name = os.environ.get("GITHUB_MODEL")
+                if record_user_text is None:
+                    return self.external_backend.generate_stream(prompt, chunk_callback, model=model_name)
+
+                assembled = []
+
+                def _wrapped_chunk(chunk, final):
+                    if chunk:
+                        assembled.append(chunk)
+                    chunk_callback(chunk, final)
+                    if final:
+                        try:
+                            final_text = "".join(assembled).strip()
+                            if final_text:
+                                self.record_interaction(record_user_text, final_text)
+                        except Exception:
+                            pass
+
+                return self.external_backend.generate_stream(prompt, _wrapped_chunk, model=model_name)
             except Exception as e:
                 try:
-                    chunk_callback(f"(openai backend error) {e}", True)
+                    chunk_callback(f"(external backend error) {e}", True)
                 except Exception:
                     pass
                 return None
@@ -517,22 +888,55 @@ class Engine:
         # append both user and assistant entries so history can include either
         self.memory.append({"user": user_text})
         self.memory.append({"assistant": reply})
-        save_memory(self.memory, max_entries=self.max_memory_entries)
+
+        dropped_user_entries = 0
+        if self.max_memory_entries and len(self.memory) > self.max_memory_entries:
+            over_by = len(self.memory) - self.max_memory_entries
+            dropped_slice = self.memory[:over_by]
+            dropped_user_entries = sum(
+                1
+                for entry in dropped_slice
+                if isinstance(entry, dict) and "user" in entry
+            )
+        self.memory = prune_memory(self.memory, self.max_memory_entries)
+        save_memory(self.memory)
 
         # update repetition trackers
         self.last_user = user_text
         self.last_reply = reply
 
+        try:
+            self._append_training_conversation(user_text, reply)
+        except Exception:
+            pass
+
         # keep corpus_texts aligned with user entries only
+        if dropped_user_entries > 0:
+            self.corpus_texts = self.corpus_texts[dropped_user_entries:]
+            try:
+                if self.embeddings_cache is not None:
+                    if torch is not None and hasattr(self.embeddings_cache, "shape"):
+                        self.embeddings_cache = self.embeddings_cache[dropped_user_entries:]
+                    elif isinstance(self.embeddings_cache, list):
+                        self.embeddings_cache = self.embeddings_cache[dropped_user_entries:]
+            except Exception:
+                self.embeddings_cache = None
+
         self.corpus_texts.append(user_text)
         try:
             emb = self._encode(user_text)
-            if emb.dim() == 1:
-                emb = emb.unsqueeze(0)
-            if self.embeddings_cache is None:
-                self.embeddings_cache = emb.cpu().detach()
+            if torch is not None and hasattr(emb, "dim"):
+                if emb.dim() == 1:
+                    emb = emb.unsqueeze(0)
+                if self.embeddings_cache is None:
+                    self.embeddings_cache = emb.cpu().detach()
+                else:
+                    self.embeddings_cache = torch.cat([self.embeddings_cache, emb.cpu().detach()], dim=0)
             else:
-                self.embeddings_cache = torch.cat([self.embeddings_cache, emb.cpu().detach()], dim=0)
+                if self.embeddings_cache is None:
+                    self.embeddings_cache = [emb]
+                else:
+                    self.embeddings_cache.append(emb)
             save_embeddings(self.embeddings_cache)
         except Exception:  # noqa: BLE001
             try:
@@ -547,14 +951,106 @@ class Engine:
         # logic centralized and makes the behaviour configurable via
         # ``EVOAI_RESPONDER``.  The responders themselves handle empty input
         # checks and memory updates.
-        reply = self.responder.respond(text, self)
+        if not text or not str(text).strip():
+            return "Please enter something."
+
+        autonomous = self.try_handle_autonomous_request(str(text), progress_cb=None)
+        if autonomous is not None:
+            return autonomous
+
+        external_reply = self._try_external_conversation_reply(str(text))
+        if external_reply:
+            self.record_interaction(str(text), external_reply)
+            self._set_status("decision_last_action", "external_backend")
+            self._set_status("decision_last_latency_ms", "0.00")
+            self._set_status("decision_last_reason", "github_models")
+            reply = external_reply
+            try:
+                from core import language_utils
+
+                clar, topic = language_utils.clarify_if_ambiguous(text)
+                if clar and topic and topic not in self.clarifications_asked:
+                    self.clarifications_asked.add(topic)
+                    reply = clar + " " + reply
+            except Exception:
+                pass
+
+            if os.environ.get("EVOAI_USE_THESAURUS", "1").lower() in ("1", "true", "yes"):
+                try:
+                    from core import language_utils
+
+                    reply = language_utils.enhance_text(reply)
+                except Exception:
+                    pass
+            return reply
+
+        decision = {
+            "action": "delegate",
+            "confidence": 1.0,
+            "elapsed_ms": 0.0,
+            "reason": "default",
+        }
+        try:
+            decision = self.decision_policy.decide(text, self)
+        except Exception:
+            decision = {
+                "action": "delegate",
+                "confidence": 0.0,
+                "elapsed_ms": 0.0,
+                "reason": "error",
+            }
+
+        action = decision.get("action", "delegate")
+        self._set_status("decision_last_action", str(action))
+        self._set_status("decision_last_latency_ms", f"{decision.get('elapsed_ms', 0.0):.2f}")
+        self._set_status("decision_last_reason", str(decision.get("reason", "unknown")))
+
+        if action == "simple_reply":
+            reply = SimpleResponder().respond(text, self)
+        elif action == "llm_generate" and self.llm_model and self.llm_tokenizer:
+            reply = SmartResponder().generate_with_model(
+                SmartResponder().build_prompt(text, self),
+                self,
+            )
+            if not reply:
+                reply = self.responder.respond(text, self)
+            else:
+                self.record_interaction(text, reply)
+        elif action == "proactive_prompt":
+            reply = self.responder.respond(text, self)
+            if (
+                self.decision_policy.allow_autonomy
+                and self._turns_since_proactive >= self.decision_autonomy_cooldown
+            ):
+                extra = " What would you like me to proactively focus on next?"
+                reply = (reply or "").strip() + extra
+                self._turns_since_proactive = 0
+            else:
+                self._turns_since_proactive += 1
+        elif action == "clarify_first":
+            try:
+                from core import language_utils
+
+                clar, _topic = language_utils.clarify_if_ambiguous(text)
+                base = self.responder.respond(text, self)
+                reply = (clar + " " + base).strip() if clar else base
+            except Exception:
+                reply = self.responder.respond(text, self)
+        else:
+            reply = self.responder.respond(text, self)
+            self._turns_since_proactive += 1
 
         # maybe ask for a clarification if the user input seemed vague
         try:
             from core import language_utils
 
             clar, topic = language_utils.clarify_if_ambiguous(text)
-            if clar and topic and topic not in self.clarifications_asked:
+            if (
+                action != "clarify_first"
+                and clar
+                and topic
+                and topic not in self.clarifications_asked
+            ):
                 self.clarifications_asked.add(topic)
                 reply = clar + " " + reply
         except Exception:

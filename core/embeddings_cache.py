@@ -1,12 +1,17 @@
 import os
-import torch
+try:
+    import torch
+except Exception:  # pragma: no cover - optional dependency
+    torch = None
 from typing import Optional
 
 DATA_DIR = os.environ.get("EVOAI_DATA_DIR", "data")
 CACHE_FILE = os.path.join(DATA_DIR, "embeddings.pt")
 
 
-def load_embeddings() -> Optional[torch.Tensor]:
+def load_embeddings() -> Optional[object]:
+    if torch is None:
+        return None
     if not os.path.exists(CACHE_FILE):
         return None
     try:
@@ -17,7 +22,9 @@ def load_embeddings() -> Optional[torch.Tensor]:
         return None
 
 
-def save_embeddings(tensor: torch.Tensor) -> None:
+def save_embeddings(tensor: object) -> None:
+    if torch is None:
+        return
     os.makedirs(os.path.dirname(CACHE_FILE), exist_ok=True)
     try:
         # Ensure tensor is on CPU and detached to avoid device issues

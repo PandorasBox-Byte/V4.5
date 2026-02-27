@@ -72,18 +72,19 @@ class ChatHandler(BaseHTTPRequestHandler):
         self.wfile.write(json.dumps({"reply": reply}).encode())
 
 
-def run(addr="127.0.0.1", port=8000):
+def run(addr="127.0.0.1", port=8000, quiet=False):
     srv = ThreadedHTTPServer((addr, port), ChatHandler)
     srv.engine = Engine()  # Use an internally-created Engine (legacy CLI entry)
     # Use double braces to include a literal JSON example in the f-string
-    print(f"EvoAI API running on http://{addr}:{port} — POST /chat with JSON {{\"text\": ...}}")
+    if not quiet:
+        print(f"EvoAI API running on http://{addr}:{port} — POST /chat with JSON {{\"text\": ...}}")
     try:
         srv.serve_forever()
     except KeyboardInterrupt:
         pass
 
 
-def run_server(engine, addr="127.0.0.1", port=8000, start_thread=True):
+def run_server(engine, addr="127.0.0.1", port=8000, start_thread=True, quiet=False):
     """Run the API server using an existing `engine` instance.
 
     If `start_thread` is True, the HTTP server will be started in a daemon
@@ -92,7 +93,8 @@ def run_server(engine, addr="127.0.0.1", port=8000, start_thread=True):
     """
     srv = ThreadedHTTPServer((addr, port), ChatHandler)
     srv.engine = engine
-    print(f"EvoAI API running on http://{addr}:{port}")
+    if not quiet:
+        print(f"EvoAI API running on http://{addr}:{port}")
     if start_thread:
         t = threading.Thread(target=srv.serve_forever, daemon=True, name="EvoAI-API")
         t.start()

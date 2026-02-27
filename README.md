@@ -1,253 +1,144 @@
-````markdown
 # EvoAI V4.5
 
-Local semantic assistant using sentence-transformers.
+Local assistant runtime with memory, semantic similarity retrieval, optional local LLM generation, optional GitHub Models backend, plugin support, API server, and startup self-test.
 
-Quick start
+## Quick start (single launcher)
 
-1. Activate the virtualenv:
-
-```bash
-source v4env/bin/activate
-```
-
-2. Run the assistant:
+Use `Start_Engine.sh` as the canonical start path.
 
 ```bash
-python launch_v4.py
+./Start_Engine.sh
 ```
 
-> **Note:** the launcher no longer prompts for an OpenAI API key at startup.  If you need
-> to supply or change the key, do so from the ASCII TUI after the engine has loaded (see
-> instructions further down in this document).
+This script:
+- creates/uses `.venv311`
+- installs requirements when the venv is first created (or when `EVOAI_FORCE_INSTALL=1`)
+- sets `PYTHONPATH`
+- prompts for `GITHUB_TOKEN` in terminal before model loading starts (skip allowed)
+- enables automatic local model discovery
+- defaults external backend provider to GitHub Models
+- starts `core/launcher.py` (ASCII TUI)
 
-Configuration
+`run_v6.sh` has been removed by design.
 
-- `MODEL_NAME`: override model (default `all-MiniLM-L6-v2`)
-- `DEVICE`: `cpu` or `cuda`
-- `THREADS`: CPU threads to allocate
-- `DISABLE_MEMORY_SAVE=1`: avoid persisting `data/memory.json`
+## Runtime behavior
 
-Notes
+- CPU-first default: `EVOAI_DEVICE=cpu`
+- Fallback-safe startup: missing optional ML dependencies do not crash startup
+- Smart responder support with memory + similarity recall
+- Decision layer in core (`EVOAI_ENABLE_DECISION_LAYER`, default on)
+- External backend provider defaults to GitHub Models (`EVOAI_BACKEND_PROVIDER=github`)
+- Normal chat can use GitHub Models directly when token is present (`EVOAI_COPILOT_CHAT=1`, default)
+- Startup self-test in TUI uses fast checks (no full pytest by default)
+- Startup log suppression in loader mode avoids curses screen corruption
+- TUI loader/API startup now runs in quiet mode to prevent overlapping text output
+- High-quality user/assistant turns are captured to `data/custom_conversations.json` for future local training
 
-- `v4env/` is included in the repository but should be removed from version control; consider recreating your venv with `instaallv4.5.sh`.
-- Large binaries were migrated to Git LFS; collaborators must run `git lfs install` and `git lfs fetch --all`.EvoAI V4.5
-=================
+## Model auto-discovery (no manual model switching required)
 
-Local, CPU-first EvoAI core runtime (designed for Intel macOS).
+When `EVOAI_AUTO_MODEL_DISCOVERY=1` (default in `Start_Engine.sh`), engine startup tries available candidates automatically.
 
-Quick start
------------
+Primary variables:
+- `EVOAI_FINETUNED_MODEL`
+- `EVOAI_LLM_MODEL`
 
-1. Create and activate the virtual environment (the repository includes `instaallv4.5.sh` to set up a pinned environment):
+Candidate chain variables:
+- `EVOAI_FINETUNED_MODEL_CANDIDATES`
+- `EVOAI_LLM_MODEL_CANDIDATES`
+
+Default discovered local paths include:
+- `data/finetuned-model`
+- `data/llm_finetuned`
+- `data/llm_finetuned_debug`
+
+## Useful environment variables
+
+- `EVOAI_BACKEND_PROVIDER` (`github`, default `github`)
+- `GITHUB_TOKEN` (or `GH_TOKEN`) for external backend auth
+- `EVOAI_COPILOT_CHAT` (`1`/`0`, default `1`) to use GitHub backend for normal conversations when available
+- `GITHUB_MODEL` (default `gpt-4o-mini`)
+- `GITHUB_MODELS_ENDPOINT` (default `https://models.inference.ai.azure.com/chat/completions`)
+- `EVOAI_TRAINING_DATA_PATH` (default `data/custom_conversations.json`)
+- `EVOAI_TRAINING_META_PATH` (default `data/conversation_capture_meta.json`)
+- `EVOAI_STARTUP_AUTO_TRAIN` (`1`/`0`, default `0`, opt-in)
+- `EVOAI_STARTUP_TRAIN_THRESHOLD` (default `80` new captured turns)
+- `EVOAI_STARTUP_TRAIN_TIMEOUT` (default `1200` seconds)
+- `EVOAI_ENABLE_DECISION_LAYER` (`1`/`0`)
+- `EVOAI_DECISION_DEPTH` (default `12`)
+- `EVOAI_DECISION_WIDTH` (default `512`)
+- `EVOAI_DECISION_TIMEOUT_MS` (default `40`)
+- `EVOAI_DECISION_MODEL_PATH` (default `data/decision_policy/model.pt`)
+- `EVOAI_DECISION_ALLOW_AUTONOMY` (`1`/`0`)
+- `EVOAI_DECISION_MAX_PROACTIVE_PER_TURN` (default `2`)
+- `EVOAI_DECISION_AUTONOMY_COOLDOWN` (default `2`)
+- `EVOAI_RESPONDER` (`simple` or `smart`)
+- `EVOAI_USE_THESAURUS` (`1`/`0`)
+- `EVOAI_STARTUP_STDOUT_LOGS` (`1` shows startup prints, `0` keeps loader clean)
+- `EVOAI_SIMILARITY_THRESHOLD` (default `0.7`)
+- `EVOAI_MAX_MEMORY` (default `500`)
+- `EVOAI_TORCH_THREADS` (default `8`)
+- `EVOAI_ENABLE_API`, `EVOAI_API_ADDR`, `EVOAI_API_PORT`
+- `EVOAI_AUTO_UPDATE_URL`
+- `EVOAI_STARTUP_SELF_TEST` (`1`/`0`)
+
+## Testing
 
 ```bash
-bash instaallv4.5.sh
-source v4env/bin/activate
+bash tests/run_all.sh
+
+# live backend smoke test (requires GITHUB_TOKEN or GH_TOKEN)
+./.venv/bin/python scripts/live_github_backend_test.py
 ```
 
-2. Run supervised launcher (preferred):
+## Training (recommended path on this Mac)
+
+Use Python 3.11 environment (`.venv311`) for real ML training.
 
 ```bash
-./run_v6.sh
+python3.11 -m venv .venv311
+./.venv311/bin/python -m pip install --upgrade pip
+./.venv311/bin/pip install torch transformers==4.41.2 accelerate sentence-transformers==5.2.3 huggingface_hub==0.36.2 datasets nltk requests
+./.venv311/bin/python scripts/train_personalization.py --emb-epochs 2 --llm-epochs 2 --decision-epochs 40
 ```
 
-This launches the engine and a lightweight ASCII monitor (in a `tmux` split if available, or a Terminal window on macOS).
+Artifacts:
+- embeddings: `data/finetuned-model`
+- local LLM: `data/llm_finetuned`
+- decision policy: `data/decision_policy/model.pt`
 
-Design notes
-------------
-- CPU-only: The system forces `device='cpu'` for `SentenceTransformer` and sets `torch` thread count.
-- Deterministic dependencies (pinned): See `requirements.txt`. Do NOT upgrade these pinned HuggingFace packages.
+## Notes on local LLM quality
 
-Config via environment variables
--------------------------------
-- `EVOAI_SIMILARITY_THRESHOLD` (default `0.7`) — similarity cutoff for reporting past user text.
-- `EVOAI_MAX_MEMORY` (default `500`) — maximum retained memory entries; older entries are pruned.
-- `EVOAI_TORCH_THREADS` (default `8`) — `torch.set_num_threads`.
-- `EVOAI_USE_THESAURUS` (`1`/`0`, default `1`) — enable synonym expansion on replies and clarification prompts.
-- `EVOAI_ENABLE_API` (`1`/`true`) — when set the engine will start a REST server on `EVOAI_API_ADDR`/`EVOAI_API_PORT` (defaults to `127.0.0.1:8000`).
-- `EVOAI_AUTO_UPDATE_URL` — if present, the engine will fetch a JSON manifest from this URL and offer to upgrade itself (user must confirm before any changes are applied).
+Current default training base model is intentionally lightweight (`sshleifer/tiny-gpt2`) to keep CPU training quick. It loads correctly but output quality can be limited compared to larger models.
 
+## Troubleshooting
 
-### OpenAI API key management
+- Engine starts but models are not loaded:
+	- Confirm model folders exist: `data/finetuned-model` and/or `data/llm_finetuned`
+	- Start via `./Start_Engine.sh` so auto-discovery env vars are set
+	- Re-run training in `.venv311` if model folders were removed by tests/cleanup
+- Startup UI text overlaps or looks corrupted:
+	- Keep `EVOAI_STARTUP_STDOUT_LOGS=0` (default in `Start_Engine.sh`)
+- External backend unavailable:
+	- Provide `GITHUB_TOKEN` at startup prompt or set it in environment (`~/.evoai_env`)
+	- You can still use `:key <token>` in TUI to update/clear during runtime
+	- Confirm `EVOAI_BACKEND_PROVIDER=github`
+- Local LLM output looks low quality:
+	- This is expected with tiny GPT-2; prefer embeddings-first mode or train a stronger local base model
+- Training fails in `.venv` (Python 3.14):
+	- Use `.venv311` for training and model loading with torch/transformers
 
-The engine no longer prompts before startup.  To set or clear the key during a
-running session, use the ASCII TUI command:
+## Documentation sync policy
 
-```
-:key <your_api_key>   # set (or change) the key
-:key                 # clear existing key
-```
+For every engine change (runtime, training, startup, memory, model-loading, tests):
+- update this file (`README.md`) with user-facing behavior changes
+- update `READMECODE.md` with technical/internal details and rationale
 
-A reminder message is displayed in the TUI history when no key is present, and
-conversion to an active `OpenAIBackend` is attempted immediately when a key is
-provided.  The value is stored only in the process environment and will be lost
-when the engine exits.
+These two files are the canonical operational and technical references for this workspace.
 
-### Thesaurus and clarification
+## Project hygiene
 
-When `EVOAI_USE_THESAURUS` is enabled the engine will consult a local
-WordNet database (via NLTK) to expand replies with synonyms and alternate
-phrasing.  It also watches for vague user inputs (`"it"`, "that", "thing"`) and
-may prepend a question asking for clarification before answering.
-
-The first time the feature is used the WordNet corpora will be downloaded
-automatically (requires outbound network access).  If you prefer to disable
-this behavioural layer you can unset the environment variable or set it to
-`0`.
-
-### Network awareness (disabled by default)
-
-A placeholder network-scanning feature exists for conceptual completeness.
-Set `EVOAI_ENABLE_NET_SCAN=permitted` to satisfy code paths; the engine will
-still **not** probe the network and will merely emit a warning. This code is a
-no-op to avoid any unauthorized reconnaissance and serves purely as a stub
-for future authorised extensions.
-
-### REST API & Home Assistant
-
-A lightweight HTTP API is available to allow other programs (e.g. Home
-Assistant) to interact with the engine.  Enable it by setting
-`EVOAI_ENABLE_API=1` and optionally adjusting the address/port.  The server
-exposes:
-
-```
-POST /chat   -> {"text": "..."}  returns {"reply": "..."}
-GET  /status -> returns JSON snapshot of internal component status
-```
-
-While the engine is running you can launch the ASCII dashboard in a second
-terminal or tmux pane:
-
-```bash
-# monitor via API
-python core/monitor_ui.py --api http://127.0.0.1:8000
-```
-
-(The `run_v6.sh` helper already does this for you if tmux is installed.)
-
-To integrate with Home Assistant you can use the `rest` sensor.  Example
-configuration:
-
-```yaml
-sensor:
-  - platform: rest
-    name: EvolutionAI Status
-    resource: http://localhost:8000/status
-    json_attributes:
-      - ready
-      - embeddings_model
-    value_template: "{{ value_json.ready }}"
-```
-
-The API server is intentionally minimal and runs in a background thread; it
-should not be exposed to untrusted networks.
-
-### Auto‑updater (opt‑in)
-
-If `EVOAI_AUTO_UPDATE_URL` points to a JSON manifest of the form:
-
-```json
-{
-  "version": "1.2",
-  "files": [
-    {"path": "core/engine_template.py", "url": "https://.../engine_template.py"}
-  ]
-}
-```
-
-the engine will periodically (currently on startup) fetch the manifest,
-download the candidate files, run the local test suite against them, and then
-prompt you with a diff.  Nothing is applied unless you type `y` at the prompt.
-This mechanism is useful for keeping a self‑hosted deployment up-to-date, but
-it must only point at a repository you trust.  The runtime never modifies your
-code without explicit consent.
-
-### Training & fine‑tuning
-
-A helper module (`core/trainer.py`) lets you fine-tune the embedding model or
-LLM on custom data.  Models are saved under `data/finetuned-model` and
-`data/llm_finetuned` by default.  When launching the engine you can point at a
-fine‑tuned embedding model using `EVOAI_FINETUNED_MODEL` (this overrides
-`EVOAI_MODEL`).
-
-Here are a couple of simple CLI examples:
-
-```bash
-# embeddings (two pairs provided for demonstration)
-python -m core.trainer embeddings --pairs "hi" "hello" "how are you" "good"
-
-# LLM (uses dummy base model in tests)
-python -m core.trainer llm --convs "hi" "hello" --base dummy
-```
-
-The `Trainer` API can also be used programmatically from Python.
-
-Files added/modified
---------------------
-- `run_v6.sh` — supervised launcher (tmux preferred).
-- `core/launcher.py` — stabilized launcher that writes `data/engine.pid` and handles signals.
-- `tools/monitor.py` — dependency-free ASCII monitor.
-- `core/memory.py` — atomic save and pruning support.
-- `core/engine_template.py` — incremental embedding cache, memory pruning, config.
-
-Safety and reproducibility
--------------------------
-- No network calls are made by the runtime itself, but `sentence-transformers` may download model weights on first run.
-- Memory is saved atomically to `data/memory.json` to avoid corruption.
-- **Network reconnaissance or automatic code modifications are not performed without explicit user permission.**  Any future features that "learn about surroundings" or fetch updates require configuration flags and a conscious opt-in; the engine will not scan devices or self-modify autonomously.
-
-Next steps
-----------
-- Add persistent embedding cache (optional) and more structured indexing for large memories.
-- Add unit tests and a CI workflow to preserve deterministic setup.
-
-Cleanup
--------
-- Obsolete installer and upgrade scripts plus legacy `launch_v4.py` were moved to `backup_removed_files/` on 2026-02-26 to keep the repository tidy.
-
-Automated update (2026-02-26)
------------------------------
-The following changes were recorded automatically and committed to the repository.
-
-Modified files:
-- README.md
-- core/engine_template.py
-- core/launcher.py
-- core/plugin_manager.py
-- data/memory.json
-- run_v6.sh
-- tests/run_all.sh
-- tests/test_engine.py
-- tests/test_plugins.py
-
-New / untracked files detected locally:
-- .venv311/ (directory)
-- Start_Engine.sh
-- core/__init__.py
-- core/api_server.py
-- core/auto_updater.py
-- core/language_utils.py
-- core/monitor_ui.py
-- core/network_scanner.py
-- core/openai_backend.py
-- core/self_repair.py
-- core/tui.py
-- core/update_test.txt
-- plugins/__init__.py
-- pyproject.toml
-- scripts/persist_openai_key.sh
-- setup.cfg
-- tests/test_language.py
-- tests/test_launcher.py
-- tests/test_monitor_ui.py
-- tests/test_tui.py
-- tests/test_updater.py
-- tools/package_mac_app.sh
-- v311env/ (directory)
-
-Notes:
-- If some of the untracked files should be included in version control, review them and run `git add <file>` before committing.
-- Sensitive files (API keys, virtualenvs) should not be committed — confirm before adding.
-
-````
+Generated artifacts and caches are excluded from version control:
+- virtual environments
+- `__pycache__`
+- `.pytest_cache`
+- model/checkpoint output directories

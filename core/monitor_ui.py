@@ -22,8 +22,7 @@ import json
 import threading
 import time
 from typing import Any
-
-import requests
+from urllib.request import Request, urlopen
 
 from core.engine_template import Engine
 
@@ -51,8 +50,10 @@ class Dashboard:
     def _fetch_status(self) -> dict[str, Any]:
         if self.api_url and not self.engine:
             try:
-                resp = requests.get(self.api_url.rstrip("/") + "/status", timeout=1)
-                return resp.json()
+                req = Request(self.api_url.rstrip("/") + "/status", headers={"Accept": "application/json"})
+                with urlopen(req, timeout=1) as resp:
+                    payload = resp.read().decode("utf-8")
+                return json.loads(payload)
             except Exception:
                 return {"error": "unreachable"}
         elif self.engine:

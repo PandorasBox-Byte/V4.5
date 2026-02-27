@@ -34,6 +34,16 @@ class LanguageUtilsTests(unittest.TestCase):
         self.assertIsNotNone(topic)
         self.assertIn(topic, q)
 
+    def test_clarify_not_triggered_for_simple_greeting(self):
+        q, topic = language_utils.clarify_if_ambiguous("how are you")
+        self.assertIsNone(q)
+        self.assertIsNone(topic)
+
+    def test_enhance_text_preserves_quoted_segment(self):
+        text = "I understand you said: 'how are you'"
+        enhanced = language_utils.enhance_text(text)
+        self.assertIn("'how are you'", enhanced)
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

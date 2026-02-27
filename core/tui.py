@@ -9,41 +9,46 @@ from __future__ import annotations
 import curses
 import textwrap
 import os
+import io
+import contextlib
+import warnings
 from typing import List
 
 # allow tests to patch or replace the backend class easily
 try:
-    from core.openai_backend import OpenAIBackend
-except Exception:  # pragma: no cover - openai optional
-    OpenAIBackend = None
+    from core.github_backend import GitHubBackend
+except Exception:  # pragma: no cover - backend optional
+    GitHubBackend = None
 
 
 def _handle_tui_command(text: str, history: List[str], engine) -> bool:
     """Return True if *text* was a recognized command and was handled.
 
     Currently only ":key" is supported.  This allows the user to set or
-    clear the OpenAI API key after the engine has already loaded.
+    clear the GitHub token after the engine has already loaded.
     """
     if not text.lower().startswith(":key"):
         return False
     parts = text.split(None, 1)
     if len(parts) == 1 or not parts[1].strip():
-        os.environ.pop("OPENAI_API_KEY", None)
-        if hasattr(engine, "openai_backend"):
-            engine.openai_backend = None
-        history.append("[TUI] OpenAI API key cleared")
+        os.environ.pop("GITHUB_TOKEN", None)
+        os.environ.pop("GH_TOKEN", None)
+        if hasattr(engine, "external_backend"):
+            engine.external_backend = None
+        history.append("[TUI] GitHub token cleared")
     else:
         val = parts[1].strip()
-        os.environ["OPENAI_API_KEY"] = val
+        os.environ["GITHUB_TOKEN"] = val
+        os.environ["EVOAI_BACKEND_PROVIDER"] = "github"
         # try to initialize backend if engine already created
-        if OpenAIBackend is not None and hasattr(engine, "openai_backend"):
+        if GitHubBackend is not None and hasattr(engine, "external_backend"):
             try:
-                engine.openai_backend = OpenAIBackend()
-                history.append("[TUI] OpenAI API key set for session")
+                engine.external_backend = GitHubBackend()
+                history.append("[TUI] GitHub token set for session")
             except Exception as e:
-                history.append(f"[TUI] failed to init OpenAI backend: {e}")
+                history.append(f"[TUI] failed to init GitHub backend: {e}")
         else:
-            history.append("[TUI] OpenAI API key set for session (backend unavailable)")
+            history.append("[TUI] GitHub token set for session (backend unavailable)")
     return True
 
 
@@ -51,10 +56,21 @@ def _draw_history(win, lines: List[str], maxy: int, maxx: int, pad_top: int = 0)
     win.erase()
     y = pad_top
     for line in lines:
-        for wrapped in textwrap.wrap(line, maxx - 2) or [""]:
+        is_selftest_bar = isinstance(line, str) and line.startswith("[SelfTest][bar]")
+        display_line = line
+        if is_selftest_bar:
+            display_line = line.replace("[SelfTest][bar]", "", 1).strip()
+
+        for wrapped in textwrap.wrap(display_line, maxx - 2) or [""]:
             if y >= maxy - 1:
                 break
-            win.addstr(y, 1, wrapped)
+            try:
+                if is_selftest_bar:
+                    win.addstr(y, 1, wrapped[: max(0, maxx - 2)], curses.color_pair(3))
+                else:
+                    win.addstr(y, 1, wrapped[: max(0, maxx - 2)])
+            except curses.error:
+                pass
             y += 1
         if y >= maxy - 1:
             break
@@ -65,7 +81,10 @@ def _draw_history(win, lines: List[str], maxy: int, maxx: int, pad_top: int = 0)
 def _draw_input(win, prompt: str, buffer: str):
     win.erase()
     maxy, maxx = win.getmaxyx()
-    win.addstr(0, 0, prompt)
+    try:
+        win.addstr(0, 0, prompt[:maxx])
+    except curses.error:
+        pass
     # truncate buffer if too long
     disp = buffer[-(maxx - len(prompt) - 1) :]
     try:
@@ -95,33 +114,28 @@ def run(engine_or_loader, stdscr=None):
 
         history: List[str] = ["Welcome to EvoAI (ASCII TUI). Type and press Enter."]
         # if no API key available, tell the user how to set one later
-        if not __import__("os").environ.get("OPENAI_API_KEY"):
-            history.append("[TUI] no OpenAI key; type ':key <your_key>' to set one (or ':key' to clear)")
+        if not (__import__("os").environ.get("GITHUB_TOKEN") or __import__("os").environ.get("GH_TOKEN")):
+            history.append("[TUI] no GitHub token; type ':key <your_token>' to set one (or ':key' to clear)")
         buffer = ""
         prompt = "You: "
         input_history: List[str] = []
         history_index = 0
 
         # Optionally start the API server in a background thread unless disabled.
-        try:
-            import os
+        if not os.environ.get("EVOAI_DISABLE_API"):
+            try:
+                from core.api_server import run_server
 
-            if not os.environ.get("EVOAI_DISABLE_API"):
-                try:
-                    from core.api_server import run_server
-
-                    api_thread = run_server(
-                        engine,
-                        addr=os.environ.get("EVOAI_API_ADDR", "127.0.0.1"),
-                        port=int(os.environ.get("EVOAI_API_PORT", "8000")),
-                        start_thread=True,
-                    )
-                except Exception:
-                    api_thread = None
-            else:
-                api_thread = None
-        except Exception:
-            api_thread = None
+                api_quiet = is_loader or os.environ.get("EVOAI_TUI_ACTIVE", "0") == "1"
+                run_server(
+                    engine,
+                    addr=os.environ.get("EVOAI_API_ADDR", "127.0.0.1"),
+                    port=int(os.environ.get("EVOAI_API_PORT", "8000")),
+                    start_thread=True,
+                    quiet=api_quiet,
+                )
+            except Exception:
+                pass
 
         # Loading screen: display big ASCII title and a progress bar while
         # running a short startup test and (optionally) waiting for the
@@ -142,7 +156,7 @@ def run(engine_or_loader, stdscr=None):
             r" E        V V   O   O",
             r" EEEEE     V     OOO ",
             r"                       ",  # blank line for spacing
-            r"      Evoultion 6      ",
+            r"      Evolution 6      ",
         ]
 
         stdscr_inner.erase()
@@ -163,8 +177,11 @@ def run(engine_or_loader, stdscr=None):
             curses.start_color()
             curses.init_pair(1, curses.COLOR_BLACK, curses.COLOR_GREEN)
             curses.init_pair(2, curses.COLOR_BLACK, curses.COLOR_RED)
+            curses.init_pair(3, curses.COLOR_GREEN, curses.COLOR_BLACK)
         except Exception:
             pass
+
+        test_message = "Starting up..."
 
         def draw_bar(frac: float, ok: bool | None = None):
             filled = int(frac * bar_w)
@@ -180,6 +197,10 @@ def run(engine_or_loader, stdscr=None):
                     stdscr_inner.addstr(bar_row, x + 1, "#" * filled)
                 stdscr_inner.addstr(bar_row, x + 1 + filled, "-" * empty)
                 stdscr_inner.addstr(bar_row, x + 1 + bar_w, "]")
+                msg = (test_message or "").strip()
+                stdscr_inner.addstr(bar_row + 1, x, " " * bar_w)
+                if msg:
+                    stdscr_inner.addstr(bar_row + 1, max(0, (maxx - len(msg)) // 2), msg)
                 stdscr_inner.refresh()
             except curses.error:
                 pass
@@ -188,13 +209,38 @@ def run(engine_or_loader, stdscr=None):
         test_result = None
         test_progress = 0.0
         model_progress = 0.0
+        startup_pass_list = {}
 
         if SelfRepair is not None:
             import threading
 
             def _run_tests():
-                nonlocal test_result, test_progress
-                ok, _out = SelfRepair.run_tests()
+                nonlocal test_result, test_progress, test_message
+
+                def _progress(frac, msg="", check_name=None, passed=None):
+                    nonlocal test_progress, test_message
+                    try:
+                        test_progress = max(test_progress, float(frac))
+                    except Exception:
+                        pass
+                    if msg:
+                        test_message = str(msg)
+                    if check_name is not None and passed is not None:
+                        startup_pass_list[str(check_name)] = bool(passed)
+                        if is_loader and loader is not None:
+                            try:
+                                loader.pass_list[str(check_name)] = bool(passed)
+                            except Exception:
+                                pass
+
+                with warnings.catch_warnings():
+                    warnings.simplefilter("ignore")
+                    with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+                        ok, _out = SelfRepair.run_tests(
+                            progress_cb=_progress,
+                            mode="startup",
+                            include_pytest=False,
+                        )
                 test_result = ok
                 test_progress = 1.0
 
@@ -229,7 +275,7 @@ def run(engine_or_loader, stdscr=None):
                 # slowly ramp test progress up to 0.95 until done
                 elapsed = time.time() - start_ts
                 # map elapsed to a soft progress for tests (bounded)
-                test_progress = min(0.95, (elapsed / max(1.0, max_wait)) )
+                test_progress = max(test_progress, min(0.95, (elapsed / max(1.0, max_wait))))
             elif test_progress < 1.0 and test_result is not None:
                 test_progress = 1.0
 
@@ -246,12 +292,18 @@ def run(engine_or_loader, stdscr=None):
                         status = '[OK]' if v else '[FAIL]'
                         pass_lines.append(f"{status} {k}")
                 else:
-                    # use local placeholder if available
-                    pass_lines = []
+                    for idx, (k, v) in enumerate(startup_pass_list.items()):
+                        status = '[OK]' if v else '[FAIL]'
+                        pass_lines.append(f"{status} {k}")
 
                 for i, pl in enumerate(pass_lines[:5]):
+                    clear_y = bar_row + 3 + i
                     try:
-                        stdscr_inner.addstr(bar_row + 3 + i, max(0, (maxx - len(pl)) // 2), pl)
+                        stdscr_inner.addstr(clear_y, max(0, (maxx - bar_w) // 2), " " * bar_w)
+                    except curses.error:
+                        pass
+                    try:
+                        stdscr_inner.addstr(clear_y, max(0, (maxx - len(pl)) // 2), pl)
                     except curses.error:
                         pass
                 stdscr_inner.refresh()
@@ -289,63 +341,6 @@ def run(engine_or_loader, stdscr=None):
             draw_bar(1.0, True)
             time.sleep(0.35)
 
-        # Autonomous startup: appear to "wake up" and ask self-questions.
-        try:
-            import queue
-
-            startup_queue = queue.Queue()
-
-            def _cb(chunk, final):
-                startup_queue.put((chunk, final))
-
-            startup_prompt = (
-                "You are EvoAI, a helpful assistant. Review your recent memory and the user's context and "
-                "generate three concise, introspective questions you would ask the user to better understand "
-                "their needs. Separate each question on its own line."
-            )
-
-            # At this point `engine` has already been set above when we
-            # swapped out the loader.  Do not overwrite it again based on the
-            # original argument – that was the source of the earlier bug where
-            # `engine` became None after the startup phase.
-            if engine and getattr(engine, "llm_model", None) and getattr(engine, "llm_tokenizer", None):
-                thread = engine.generate_stream(startup_prompt, _cb, chunk_size=64)
-                # consume queue and append to history while thread runs
-                assembling = ""
-                while True:
-                    try:
-                        chunk, final = startup_queue.get(timeout=0.1)
-                        if chunk:
-                            assembling += chunk
-                            # update last EvoAI line or append
-                            if not history or not history[-1].startswith("EvoAI:"):
-                                history.append("EvoAI: " + assembling)
-                            else:
-                                history[-1] = "EvoAI: " + assembling
-                            _draw_history(history_win, history, hist_h, maxx, pad_top=0)
-                            curses.doupdate()
-                        if final:
-                            break
-                    except queue.Empty:
-                        if thread and not thread.is_alive():
-                            break
-                        continue
-            else:
-                # fallback canned introspective questions
-                canned = [
-                    "EvoAI: What is the most important thing you want help with today?",
-                    "EvoAI: Are there recent files or notes I should consider?",
-                    "EvoAI: How do you prefer responses — concise, detailed, or step-by-step?",
-                ]
-                for q in canned:
-                    history.append(q)
-                    _draw_history(history_win, history, hist_h, maxx, pad_top=0)
-                    curses.doupdate()
-                    time.sleep(0.25)
-        except Exception:
-            # don't let startup sequence crash the UI
-            pass
-
         while True:
             maxy, maxx = stdscr_inner.getmaxyx()
             hist_h = maxy - 3
@@ -376,6 +371,45 @@ def run(engine_or_loader, stdscr=None):
                 if _handle_tui_command(text, history, engine):
                     # command consumed, skip engine respond
                     continue
+
+                try:
+                    autonomous_handler = getattr(engine, "try_handle_autonomous_request", None)
+                except Exception:
+                    autonomous_handler = None
+
+                if callable(autonomous_handler):
+                    bar_idx = None
+
+                    def _selftest_progress(frac, msg="", check_name=None, passed=None):
+                        nonlocal bar_idx
+                        try:
+                            pct = max(0, min(100, int(float(frac) * 100)))
+                        except Exception:
+                            pct = 0
+                        total = 20
+                        filled = max(0, min(total, int((pct / 100.0) * total)))
+                        bar = ("*" * filled) + ("-" * (total - filled))
+                        tail = str(msg or "").strip()
+                        line = f"[SelfTest][bar] [{bar}] {pct}% {tail}".rstrip()
+                        if bar_idx is None:
+                            history.append(line)
+                            bar_idx = len(history) - 1
+                        else:
+                            history[bar_idx] = line
+                        _draw_history(history_win, history, hist_h, maxx, pad_top=0)
+                        _draw_input(input_win, prompt, buffer)
+                        curses.doupdate()
+
+                    try:
+                        autonomous_reply = autonomous_handler(text, _selftest_progress)
+                    except Exception:
+                        autonomous_reply = None
+
+                    if autonomous_reply is not None:
+                        history.append(f"EvoAI: {autonomous_reply}")
+                        if len(history) > 1000:
+                            history = history[-1000:]
+                        continue
 
                 try:
                     reply = engine.respond(text)
@@ -415,10 +449,18 @@ def run(engine_or_loader, stdscr=None):
                 except Exception:
                     pass
 
-    if stdscr is None:
-        curses.wrapper(_main)
-    else:
-        _main(stdscr)
+    prev_tui = os.environ.get("EVOAI_TUI_ACTIVE")
+    os.environ["EVOAI_TUI_ACTIVE"] = "1"
+    try:
+        if stdscr is None:
+            curses.wrapper(_main)
+        else:
+            _main(stdscr)
+    finally:
+        if prev_tui is None:
+            os.environ.pop("EVOAI_TUI_ACTIVE", None)
+        else:
+            os.environ["EVOAI_TUI_ACTIVE"] = prev_tui
 
 
 if __name__ == "__main__":

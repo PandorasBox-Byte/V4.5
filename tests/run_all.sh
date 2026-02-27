@@ -1,8 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-PY="./v4env/bin/python"
-if [ ! -x "$PY" ]; then
+if [ -x "./.venv/bin/python" ]; then
+  PY="./.venv/bin/python"
+elif [ -x "./v4env/bin/python" ]; then
+  PY="./v4env/bin/python"
+else
   PY="python3"
 fi
 

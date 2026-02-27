@@ -9,8 +9,12 @@ MEMORY_FILE = os.path.join("data", "memory.json")
 def load_memory() -> List[Any]:
     if not os.path.exists(MEMORY_FILE):
         return []
-    with open(MEMORY_FILE, "r", encoding="utf-8") as f:
-        return json.load(f)
+    try:
+        with open(MEMORY_FILE, "r", encoding="utf-8") as f:
+            data = json.load(f)
+            return data if isinstance(data, list) else []
+    except Exception:
+        return []
 
 
 def prune_memory(memory: List[Any], max_entries: Optional[int]) -> List[Any]:

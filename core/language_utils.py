@@ -1,10 +1,16 @@
 import random
-import nltk
-from nltk.corpus import wordnet as wn
+try:
+    import nltk
+    from nltk.corpus import wordnet as wn
+except Exception:  # pragma: no cover - optional dependency
+    nltk = None
+    wn = None
 
 
 def ensure_wordnet():
     """Make sure WordNet data is available, downloading if necessary."""
+    if nltk is None or wn is None:
+        return
     try:
         # simple access will raise LookupError if not present
         wn.synsets("test")
@@ -15,6 +21,8 @@ def ensure_wordnet():
 
 def get_synonyms(word: str) -> list[str]:
     """Return a list of synonyms for *word* using WordNet."""
+    if nltk is None or wn is None:
+        return [word]
     ensure_wordnet()
     syns = set()
     for syn in wn.synsets(word):
@@ -34,10 +42,25 @@ def enhance_text(text: str) -> str:
     ensure_wordnet()
     words = text.split()
     output = []
+    in_single_quote = False
     for w in words:
+        if in_single_quote and "'" not in w:
+            output.append(w)
+            continue
+
+        if "'" in w:
+            quote_count = w.count("'")
+            was_in_quote = in_single_quote
+            if quote_count % 2 == 1:
+                in_single_quote = not in_single_quote
+            # preserve quoted content exactly
+            if was_in_quote or in_single_quote:
+                output.append(w)
+                continue
+
         base = w.strip(".,!?;")
-        # only try to replace short words
-        if not base or len(base) < 3:
+        # avoid mutating very short tokens (often grammar glue words)
+        if not base or len(base) < 4:
             output.append(w)
             continue
         syns = get_synonyms(base)
@@ -67,10 +90,17 @@ def clarify_if_ambiguous(text: str) -> tuple[str | None, str | None]:
     for w in words:
         if w in ambiguous_tokens:
             return (f"Could you clarify what you mean by '{w}'?", w)
-    # additionally, if the sentence contains a word with many synonyms, it
-    # might be vague; pick the first such word that has >5 synonyms.
+    if nltk is None or wn is None:
+        broad_action_words = {"run", "do", "make", "go", "fix", "change"}
+        for w in words:
+            if w in broad_action_words:
+                return (f"When you say '{w}', are you referring to anything specific?", w)
+        return (None, None)
+
+    # Keep clarification strict to explicit ambiguous tokens and broad actions.
+    broad_action_words = {"run", "do", "make", "go", "fix", "change"}
     for w in words:
-        syns = get_synonyms(w)
-        if len(syns) > 5:
+        if w in broad_action_words:
             return (f"When you say '{w}', are you referring to anything specific?", w)
+
     return (None, None)

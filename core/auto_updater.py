@@ -16,8 +16,13 @@ import shutil
 import sys
 import tempfile
 from pathlib import Path
+from urllib.request import Request, urlopen
 
-import requests
+
+def _http_get(url: str, timeout: int = 10) -> bytes:
+    req = Request(url, headers={"Accept": "application/json"})
+    with urlopen(req, timeout=timeout) as resp:
+        return resp.read()
 
 
 def check_for_updates(manifest_url: str) -> dict | None:
@@ -28,19 +33,17 @@ def check_for_updates(manifest_url: str) -> dict | None:
     project root) and ``url`` telling where to download the updated file.
     """
     try:
-        resp = requests.get(manifest_url, timeout=10)
-        resp.raise_for_status()
-        return resp.json()
+        body = _http_get(manifest_url, timeout=10)
+        return json.loads(body.decode("utf-8"))
     except Exception:
         return None
 
 
 def _download_file(url: str, dest: Path) -> None:
-    resp = requests.get(url, timeout=10)
-    resp.raise_for_status()
+    content = _http_get(url, timeout=10)
     dest.parent.mkdir(parents=True, exist_ok=True)
     with open(dest, "wb") as f:
-        f.write(resp.content)
+        f.write(content)
 
 
 def _compute_diff(old_path: Path, new_path: Path) -> str:
