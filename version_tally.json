@@ -1,8 +1,8 @@
 {
-  "current_version": "5.0.0",
+  "current_version": "5.0.1",
   "major": 5,
   "minor": 0,
-  "patch": 0,
+  "patch": 1,
   "rules": {
     "major": "Major structural changes (non-engine architecture shifts)",
     "minor": "Feature-level and other minor changes",
@@ -15,6 +15,13 @@
       "from": "4.5.0",
       "to": "5.0.0",
       "reason": "Major structural updates: backend migration, decision layer integration, startup/runtime contract changes"
+    },
+    {
+      "date": "2026-02-27",
+      "change": "patch",
+      "from": "5.0.0",
+      "to": "5.0.1",
+      "reason": "TUI: add bottom-left version label and startup checklist grid layout"
     }
   ]
 }

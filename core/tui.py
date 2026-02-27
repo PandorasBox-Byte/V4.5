@@ -10,15 +10,50 @@ import curses
 import textwrap
 import os
 import io
+import json
 import contextlib
 import warnings
 from typing import List
+from pathlib import Path
 
 # allow tests to patch or replace the backend class easily
 try:
     from core.github_backend import GitHubBackend
 except Exception:  # pragma: no cover - backend optional
     GitHubBackend = None
+
+
+def _read_version_label() -> str:
+    repo_root = Path(__file__).resolve().parent.parent
+    tally_path = repo_root / "version_tally.json"
+    setup_cfg_path = repo_root / "setup.cfg"
+
+    try:
+        if tally_path.exists():
+            data = json.loads(tally_path.read_text(encoding="utf-8"))
+            current = str(data.get("current_version", "")).strip()
+            if current:
+                major = current.split(".", 1)[0]
+                return f"{current} (V{major})"
+    except Exception:
+        pass
+
+    try:
+        if setup_cfg_path.exists():
+            for raw in setup_cfg_path.read_text(encoding="utf-8").splitlines():
+                line = raw.strip()
+                if line.startswith("version") and "=" in line:
+                    current = line.split("=", 1)[1].strip()
+                    if current:
+                        major = current.split(".", 1)[0]
+                        return f"{current} (V{major})"
+    except Exception:
+        pass
+
+    return "unknown"
+
+
+VERSION_LABEL = _read_version_label()
 
 
 def _handle_tui_command(text: str, history: List[str], engine) -> bool:
@@ -78,7 +113,7 @@ def _draw_history(win, lines: List[str], maxy: int, maxx: int, pad_top: int = 0)
     win.noutrefresh()
 
 
-def _draw_input(win, prompt: str, buffer: str):
+def _draw_input(win, prompt: str, buffer: str, version_label: str = ""):
     win.erase()
     maxy, maxx = win.getmaxyx()
     try:
@@ -91,6 +126,11 @@ def _draw_input(win, prompt: str, buffer: str):
         win.addstr(0, len(prompt), disp)
     except curses.error:
         pass
+    if version_label:
+        try:
+            win.addstr(maxy - 1, 0, version_label[:maxx])
+        except curses.error:
+            pass
     win.clrtoeol()
     win.noutrefresh()
 
@@ -205,6 +245,36 @@ def run(engine_or_loader, stdscr=None):
             except curses.error:
                 pass
 
+        def draw_pass_grid(entries):
+            rows_to_clear = 6
+            grid_y = bar_row + 3
+            left = max(0, (maxx - bar_w) // 2)
+
+            for row in range(rows_to_clear):
+                try:
+                    stdscr_inner.addstr(grid_y + row, left, " " * bar_w)
+                except curses.error:
+                    pass
+
+            if not entries:
+                return
+
+            cols = 2 if bar_w >= 44 else 1
+            gap = 2
+            cell_w = max(12, (bar_w - (gap * (cols - 1))) // cols)
+            max_cells = rows_to_clear * cols
+
+            for idx, (name, passed) in enumerate(entries[:max_cells]):
+                row = idx // cols
+                col = idx % cols
+                x = left + col * (cell_w + gap)
+                status = "[OK]" if passed else "[FAIL]"
+                text = f"{status} {name}"
+                try:
+                    stdscr_inner.addstr(grid_y + row, x, text[:cell_w])
+                except curses.error:
+                    pass
+
         # run tests in background and update bar
         test_result = None
         test_progress = 0.0
@@ -284,28 +354,17 @@ def run(engine_or_loader, stdscr=None):
 
             # draw pass list under the bar
             try:
-                pass_lines = []
+                pass_items = []
                 if is_loader and loader is not None:
                     # loader object has pass_list
                     pls = getattr(loader, 'pass_list', {}) or {}
-                    for idx, (k, v) in enumerate(pls.items()):
-                        status = '[OK]' if v else '[FAIL]'
-                        pass_lines.append(f"{status} {k}")
+                    for k, v in pls.items():
+                        pass_items.append((str(k), bool(v)))
                 else:
-                    for idx, (k, v) in enumerate(startup_pass_list.items()):
-                        status = '[OK]' if v else '[FAIL]'
-                        pass_lines.append(f"{status} {k}")
+                    for k, v in startup_pass_list.items():
+                        pass_items.append((str(k), bool(v)))
 
-                for i, pl in enumerate(pass_lines[:5]):
-                    clear_y = bar_row + 3 + i
-                    try:
-                        stdscr_inner.addstr(clear_y, max(0, (maxx - bar_w) // 2), " " * bar_w)
-                    except curses.error:
-                        pass
-                    try:
-                        stdscr_inner.addstr(clear_y, max(0, (maxx - len(pl)) // 2), pl)
-                    except curses.error:
-                        pass
+                draw_pass_grid(pass_items)
                 stdscr_inner.refresh()
             except Exception:
                 pass
@@ -353,7 +412,7 @@ def run(engine_or_loader, stdscr=None):
                 pass
 
             _draw_history(history_win, history, hist_h, maxx, pad_top=0)
-            _draw_input(input_win, prompt, buffer)
+            _draw_input(input_win, prompt, buffer, VERSION_LABEL)
             curses.doupdate()
 
             ch = input_win.getch()
@@ -397,7 +456,7 @@ def run(engine_or_loader, stdscr=None):
                         else:
                             history[bar_idx] = line
                         _draw_history(history_win, history, hist_h, maxx, pad_top=0)
-                        _draw_input(input_win, prompt, buffer)
+                        _draw_input(input_win, prompt, buffer, VERSION_LABEL)
                         curses.doupdate()
 
                     try:
