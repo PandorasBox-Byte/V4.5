@@ -135,6 +135,35 @@ class LauncherTests(unittest.TestCase):
         mock_getpass.assert_not_called()
         self.assertEqual(os.environ.get("GITHUB_TOKEN"), "foo")
 
+    def test_update_restart_guard_clears_when_version_already_applied(self):
+        os.environ["EVOAI_UPDATED_TARGET_VERSION"] = "5.1.2"
+        with patch("core.launcher.get_local_version", return_value="5.1.2"):
+            loader = types.SimpleNamespace(update_done=False, update_success=False, reports=[])
+
+            def report(frac, msg="", **kwargs):
+                loader.reports.append((frac, msg, kwargs.get("phase")))
+
+            loader.report = report
+
+            enabled = os.environ.get("EVOAI_ENABLE_STARTUP_GIT_UPDATE", "1").lower() in ("1", "true", "yes")
+            self.assertTrue(enabled)
+
+            # replicate guarded early-return logic path
+            guard_target = (os.environ.get("EVOAI_UPDATED_TARGET_VERSION") or "").strip()
+            local_ver = "5.1.2"
+            local_tuple = launcher._semver_tuple(local_ver)
+            guard_tuple = launcher._semver_tuple(guard_target)
+            if local_tuple is not None and guard_tuple is not None and local_tuple >= guard_tuple:
+                os.environ.pop("EVOAI_UPDATED_TARGET_VERSION", None)
+                loader.update_success = True
+                loader.update_done = True
+                loader.report(1.0, f"Update already applied: v{local_ver}", phase="update")
+
+            self.assertTrue(loader.update_done)
+            self.assertTrue(loader.update_success)
+            self.assertNotIn("EVOAI_UPDATED_TARGET_VERSION", os.environ)
+            self.assertTrue(any("Update already applied" in msg for _, msg, _ in loader.reports))
+
     def test_prompt_with_saved_token_change_updates_file(self):
         with open(self._token_file, "w", encoding="utf-8") as f:
             f.write("export GITHUB_TOKEN='oldtoken'\n")

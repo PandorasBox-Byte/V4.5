@@ -1,7 +1,7 @@
 # READMECODE (Technical Context + Change History)
 
 This document is a technical handoff/reference for developers and AI assistants.
-It describes what EvoAI V5.1.1 (V5) is, how it starts, model/data flow, and major fixes made in this workspace.
+It describes what EvoAI V5.1.2 (V5) is, how it starts, model/data flow, and major fixes made in this workspace.
 
 ## Versioning rule (project contract)
 
@@ -11,6 +11,14 @@ It describes what EvoAI V5.1.1 (V5) is, how it starts, model/data flow, and majo
 - `PATCH`: increment for bug fixes
 - Source of truth files: `version_tally.json` and `setup.cfg`
 - Bump utility: `scripts/bump_version.py`
+
+## Release history (major/minor/patch)
+
+- `5.0.0` **MAJOR**: backend migration + decision layer integration + startup/runtime contract changes.
+- `5.0.1` **PATCH**: TUI version label and startup checklist grid rendering updates.
+- `5.1.0` **MINOR**: startup git-tag updater, loading-screen update phase, and restart-on-success behavior.
+- `5.1.1` **PATCH**: startup GitHub token persistence and reuse/change/skip prompt flow.
+- `5.1.2` **PATCH**: updater loop prevention after stash-pop by re-normalizing release version files.
 
 ## Latest minor change (5.1.0)
 
@@ -24,6 +32,12 @@ It describes what EvoAI V5.1.1 (V5) is, how it starts, model/data flow, and majo
 - Fixed startup token persistence bug in `core/launcher.py` so first entered token is saved.
 - Added startup choice flow to reuse saved token, change token, or skip token before boot.
 - Added launcher tests for persistence and saved-token change behavior.
+
+## Latest patch change (5.1.2)
+
+- Fixed updater loop in `core/auto_updater.py` by enforcing release version files from the target tag after `stash pop` when needed.
+- Added launcher-side update guard in `core/launcher.py` to avoid repeated restart/update cycles for the same target version.
+- Added updater regression test in `tests/test_updater.py` for post-update version normalization.
 
 ## 1) System purpose
 

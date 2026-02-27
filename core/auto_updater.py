@@ -176,6 +176,14 @@ def _has_git_repo(root: Path) -> bool:
     return (root / ".git").exists()
 
 
+def _enforce_release_version_files(target_tag: str, root: Path) -> tuple[bool, str]:
+    files = ["version_tally.json", "setup.cfg"]
+    code, _out, err = _run_git(["checkout", target_tag, "--", *files], cwd=root, timeout=60)
+    if code != 0:
+        return False, (err or "failed to restore release version files from target tag")
+    return True, ""
+
+
 def run_startup_git_update(
     progress_cb: Callable[[float, str], None] | None = None,
     remote: str = "origin",
@@ -279,6 +287,26 @@ def run_startup_git_update(
                 result.failed_reason = err or out or "stash pop conflict"
                 _progress(1.0, f"Update failed: {result.failed_reason}")
                 return result
+
+            target_tuple = _parse_semver_tag(target_tag)
+            local_after_pop = get_local_version()
+            local_tuple = _semver_tuple_from_version(local_after_pop)
+            if target_tuple is not None and (local_tuple is None or local_tuple < target_tuple):
+                _progress(0.92, "Normalizing release version files...")
+                ok, reason = _enforce_release_version_files(target_tag, root)
+                if not ok:
+                    result.success = False
+                    result.failed_reason = reason
+                    _progress(1.0, f"Update failed: {result.failed_reason}")
+                    return result
+
+                local_after_fix = get_local_version()
+                local_fixed_tuple = _semver_tuple_from_version(local_after_fix)
+                if local_fixed_tuple is None or local_fixed_tuple < target_tuple:
+                    result.success = False
+                    result.failed_reason = "local version still behind after update"
+                    _progress(1.0, f"Update failed: {result.failed_reason}")
+                    return result
 
         result.updated = True
         result.needs_restart = True

@@ -23,10 +23,21 @@ if __name__ == "__main__" and __package__ is None:
 
 from core.engine_template import Engine
 from core.self_repair import SelfRepair
-from core.auto_updater import run_startup_git_update
+from core.auto_updater import run_startup_git_update, get_local_version
 from core import tui
 
 PIDFILE = os.path.join("data", "engine.pid")
+_UPDATE_GUARD_ENV = "EVOAI_UPDATED_TARGET_VERSION"
+
+
+def _semver_tuple(value: str) -> tuple[int, int, int] | None:
+    try:
+        parts = value.strip().split(".")
+        if len(parts) != 3:
+            return None
+        return int(parts[0]), int(parts[1]), int(parts[2])
+    except Exception:
+        return None
 
 
 def write_pidfile():
@@ -331,6 +342,18 @@ def main():
                     loader.update_done = True
                     return
 
+                guard_target = (os.environ.get(_UPDATE_GUARD_ENV) or "").strip()
+                if guard_target:
+                    local_ver = (get_local_version() or "").strip().lstrip("v")
+                    local_tuple = _semver_tuple(local_ver)
+                    guard_tuple = _semver_tuple(guard_target.lstrip("v"))
+                    if local_tuple is not None and guard_tuple is not None and local_tuple >= guard_tuple:
+                        os.environ.pop(_UPDATE_GUARD_ENV, None)
+                        loader.update_success = True
+                        loader.update_done = True
+                        loader.report(1.0, f"Update already applied: v{local_ver}", phase="update")
+                        return
+
                 remote = os.environ.get("EVOAI_GIT_REMOTE", "origin")
 
                 def _update_progress(frac: float, msg: str):
@@ -343,10 +366,14 @@ def main():
 
                 if result.updated and result.success and result.needs_restart:
                     loader.restart_requested = True
+                    if result.remote_version:
+                        os.environ[_UPDATE_GUARD_ENV] = str(result.remote_version)
                     loader.report(1.0, f"Update successful: v{result.remote_version}", phase="update")
                 elif not result.success:
+                    os.environ.pop(_UPDATE_GUARD_ENV, None)
                     loader.report(1.0, f"Update failed: {loader.update_error}", phase="update")
                 else:
+                    os.environ.pop(_UPDATE_GUARD_ENV, None)
                     loader.report(1.0, "No update required", phase="update")
 
             update_thread = threading.Thread(target=_run_update_phase, daemon=True)

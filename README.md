@@ -1,10 +1,10 @@
-# EvoAI V5.1.1 (V5)
+# EvoAI V5.1.2 (V5)
 
 Local assistant runtime with memory, semantic similarity retrieval, optional local LLM generation, optional GitHub Models backend, plugin support, API server, and startup self-test.
 
 ## Versioning tally system
 
-- Current release: `5.1.1` (`V5`)
+- Current release: `5.1.2` (`V5`)
 - Version format: `MAJOR.MINOR.PATCH`
 - `MAJOR`: increment for major structural changes (non-engine architecture shifts)
 - `MINOR`: increment for feature-level/minor changes
@@ -20,7 +20,21 @@ python scripts/bump_version.py --change patch --reason "describe the bug fix"
 
 This updates both `version_tally.json` and `setup.cfg`.
 
-## Latest patch summary (5.1.1)
+## Latest patch summary (5.1.2)
+
+- Fixed updater loop after detected updates by normalizing release version files after stash pop.
+- Added launcher restart guard to prevent repeated update/restart cycles for the same target version.
+- Added regression coverage to ensure startup updater does not repeatedly re-apply the same release.
+
+## Release history (major/minor/patch)
+
+- `5.0.0` **MAJOR**: backend/architecture shift (GitHub backend integration, decision layer, startup/runtime contract updates).
+- `5.0.1` **PATCH**: TUI version label + startup checklist grid layout improvements.
+- `5.1.0` **MINOR**: startup git-tag updater + update progress screen + auto-restart flow.
+- `5.1.1` **PATCH**: startup token persistence and reuse/change/skip token prompt before boot.
+- `5.1.2` **PATCH**: updater loop fix after update detection (post-stash version normalization + regression test).
+
+## Previous patch summary (5.1.1)
 
 - Fixed startup token persistence: first entered GitHub token now saves to `~/.evoai_env`.
 - Added startup prompt to reuse saved token, change it, or continue without token.

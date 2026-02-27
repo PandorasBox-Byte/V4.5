@@ -1,8 +1,8 @@
 {
-  "current_version": "5.1.1",
+  "current_version": "5.1.2",
   "major": 5,
   "minor": 1,
-  "patch": 1,
+  "patch": 2,
   "rules": {
     "major": "Major structural changes (non-engine architecture shifts)",
     "minor": "Feature-level and other minor changes",
@@ -36,6 +36,13 @@
       "from": "5.1.0",
       "to": "5.1.1",
       "reason": "Fix startup GitHub token persistence and reuse/change prompt"
+    },
+    {
+      "date": "2026-02-27",
+      "change": "patch",
+      "from": "5.1.1",
+      "to": "5.1.2",
+      "reason": "Fix startup updater loop by normalizing release version files after stash pop"
     }
   ]
 }
