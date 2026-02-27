@@ -1,7 +1,7 @@
 # READMECODE (Technical Context + Change History)
 
 This document is a technical handoff/reference for developers and AI assistants.
-It describes what EvoAI V5.1.0 (V5) is, how it starts, model/data flow, and major fixes made in this workspace.
+It describes what EvoAI V5.1.1 (V5) is, how it starts, model/data flow, and major fixes made in this workspace.
 
 ## Versioning rule (project contract)
 
@@ -18,6 +18,12 @@ It describes what EvoAI V5.1.0 (V5) is, how it starts, model/data flow, and majo
 - Added update phase wiring in `core/launcher.py` before engine construction.
 - Added dedicated update loading screen in `core/tui.py` and launcher restart action after successful update.
 - Update detection does not change local version number automatically; release number still comes from `version_tally.json` / `setup.cfg`.
+
+## Latest patch change (5.1.1)
+
+- Fixed startup token persistence bug in `core/launcher.py` so first entered token is saved.
+- Added startup choice flow to reuse saved token, change token, or skip token before boot.
+- Added launcher tests for persistence and saved-token change behavior.
 
 ## 1) System purpose
 

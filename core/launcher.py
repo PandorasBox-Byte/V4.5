@@ -3,6 +3,7 @@ import signal
 import sys
 import time
 import json
+import shlex
 import subprocess
 import io
 import contextlib
@@ -55,6 +56,47 @@ def _restart_launcher_process() -> None:
 
 # internal flag preventing repeated prompting
 _prompted_for_key = False
+
+
+def _token_env_file() -> str:
+    return os.environ.get("EVOAI_TOKEN_ENV_FILE", os.path.join(os.path.expanduser("~"), ".evoai_env"))
+
+
+def _load_saved_token() -> str | None:
+    path = _token_env_file()
+    if not os.path.exists(path):
+        return None
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            for raw in f:
+                line = raw.strip()
+                if not line or line.startswith("#"):
+                    continue
+                if line.startswith("export GITHUB_TOKEN="):
+                    _, value = line.split("=", 1)
+                    parsed = shlex.split(value)
+                    token = parsed[0] if parsed else value.strip().strip('"').strip("'")
+                    token = token.strip()
+                    return token or None
+    except Exception:
+        return None
+    return None
+
+
+def _persist_token(token: str) -> bool:
+    path = _token_env_file()
+    safe_token = token.strip()
+    if not safe_token:
+        return False
+    try:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w", encoding="utf-8") as f:
+            f.write("# EvoAI GitHub token\n")
+            f.write(f"export GITHUB_TOKEN={safe_token!r}\n")
+        os.chmod(path, 0o600)
+        return True
+    except Exception:
+        return False
 
 
 def _maybe_run_startup_training() -> None:
@@ -127,24 +169,47 @@ def _maybe_prompt_for_api_key() -> None:
     if _prompted_for_key:
         return
 
-    if sys.stdout.isatty() and not (os.environ.get("GITHUB_TOKEN") or os.environ.get("GH_TOKEN")):
+    if sys.stdout.isatty():
         try:
             import getpass
 
-            key = getpass.getpass(
-                "Paste your GitHub token (leave empty to skip, not saved): "
-            )
-            # strip whitespace; empty means we explicitly do not want to
-            # use a key for this session.  Remove any existing (empty)
-            # environment variable to avoid re-prompting later.
-            if key and key.strip():
-                os.environ["GITHUB_TOKEN"] = key.strip()
+            env_token = (os.environ.get("GITHUB_TOKEN") or os.environ.get("GH_TOKEN") or "").strip()
+            saved_token = _load_saved_token()
+            base_token = env_token or saved_token or ""
+
+            if base_token:
+                choice = input("Use saved GitHub token? [Y=use / C=change / S=skip]: ").strip().lower()
+                if choice in ("", "y", "yes"):
+                    os.environ["GITHUB_TOKEN"] = base_token
+                    os.environ.pop("GH_TOKEN", None)
+                elif choice in ("c", "change", "n", "no"):
+                    key = getpass.getpass("Paste new GitHub token (leave empty to skip): ")
+                    if key and key.strip():
+                        token = key.strip()
+                        os.environ["GITHUB_TOKEN"] = token
+                        os.environ.pop("GH_TOKEN", None)
+                        if _persist_token(token):
+                            print(f"[launcher] token saved to {_token_env_file()}")
+                    else:
+                        os.environ.pop("GITHUB_TOKEN", None)
+                        os.environ.pop("GH_TOKEN", None)
+                        print("[launcher] no token provided, continuing without GitHub backend access")
+                else:
+                    os.environ.pop("GITHUB_TOKEN", None)
+                    os.environ.pop("GH_TOKEN", None)
+                    print("[launcher] continuing without GitHub token")
             else:
-                # explicit user choice to skip; clear any existing variable
-                os.environ.pop("GITHUB_TOKEN", None)
-                os.environ.pop("GH_TOKEN", None)
-                # let the user know the engine will continue without key
-                print("[launcher] no token provided, continuing without GitHub backend access")
+                key = getpass.getpass("Paste your GitHub token (leave empty to skip): ")
+                if key and key.strip():
+                    token = key.strip()
+                    os.environ["GITHUB_TOKEN"] = token
+                    os.environ.pop("GH_TOKEN", None)
+                    if _persist_token(token):
+                        print(f"[launcher] token saved to {_token_env_file()}")
+                else:
+                    os.environ.pop("GITHUB_TOKEN", None)
+                    os.environ.pop("GH_TOKEN", None)
+                    print("[launcher] no token provided, continuing without GitHub backend access")
         except Exception:
             # non-fatal: continue without setting a key
             pass

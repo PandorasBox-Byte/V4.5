@@ -1,10 +1,10 @@
-# EvoAI V5.1.0 (V5)
+# EvoAI V5.1.1 (V5)
 
 Local assistant runtime with memory, semantic similarity retrieval, optional local LLM generation, optional GitHub Models backend, plugin support, API server, and startup self-test.
 
 ## Versioning tally system
 
-- Current release: `5.1.0` (`V5`)
+- Current release: `5.1.1` (`V5`)
 - Version format: `MAJOR.MINOR.PATCH`
 - `MAJOR`: increment for major structural changes (non-engine architecture shifts)
 - `MINOR`: increment for feature-level/minor changes
@@ -20,7 +20,12 @@ python scripts/bump_version.py --change patch --reason "describe the bug fix"
 
 This updates both `version_tally.json` and `setup.cfg`.
 
-## Latest minor summary (5.1.0)
+## Latest patch summary (5.1.1)
+
+- Fixed startup token persistence: first entered GitHub token now saves to `~/.evoai_env`.
+- Added startup prompt to reuse saved token, change it, or continue without token.
+
+## Previous minor summary (5.1.0)
 
 - Added startup GitHub update checks using latest SemVer tag comparison.
 - Added git-delta update flow (changed/new files + upstream deletions) with auto-stash/pop handling.

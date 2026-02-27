@@ -14,7 +14,15 @@ class LauncherTests(unittest.TestCase):
     def setUp(self):
         # ensure environment clean and reset prompt flag
         os.environ.pop("GITHUB_TOKEN", None)
+        os.environ.pop("GH_TOKEN", None)
         launcher._prompted_for_key = False
+        self._tmp = tempfile.TemporaryDirectory()
+        self._token_file = os.path.join(self._tmp.name, ".evoai_env")
+        os.environ["EVOAI_TOKEN_ENV_FILE"] = self._token_file
+
+    def tearDown(self):
+        self._tmp.cleanup()
+        os.environ.pop("EVOAI_TOKEN_ENV_FILE", None)
 
     def test_startup_training_runs_at_threshold(self):
         with tempfile.TemporaryDirectory() as td:
@@ -53,7 +61,7 @@ class LauncherTests(unittest.TestCase):
                     os.environ["EVOAI_STARTUP_AUTO_TRAIN"] = old_auto
 
     def test_prompt_sets_key_when_provided(self):
-        # first call should ask and set the key
+        # first call should ask, set, and persist the key
         with patch("getpass.getpass", return_value="   mykey   ") as mock_getpass:
             fake_out = io.StringIO()
             fake_out.isatty = lambda: True
@@ -61,6 +69,10 @@ class LauncherTests(unittest.TestCase):
                 launcher._maybe_prompt_for_api_key()
             mock_getpass.assert_called_once()
             self.assertEqual(os.environ.get("GITHUB_TOKEN"), "mykey")
+            self.assertTrue(os.path.exists(self._token_file))
+            with open(self._token_file, "r", encoding="utf-8") as f:
+                content = f.read()
+            self.assertIn("GITHUB_TOKEN", content)
         # second invocation should not call getpass again
         with patch("getpass.getpass", return_value="ignored") as mock_getpass:
             launcher._maybe_prompt_for_api_key()
@@ -113,10 +125,33 @@ class LauncherTests(unittest.TestCase):
 
     def test_no_prompt_if_key_already_set(self):
         os.environ["GITHUB_TOKEN"] = "foo"
-        with patch("getpass.getpass", return_value="bar") as mock_getpass:
-            launcher._maybe_prompt_for_api_key()
-            mock_getpass.assert_not_called()
-            self.assertEqual(os.environ.get("GITHUB_TOKEN"), "foo")
+        fake_out = io.StringIO()
+        fake_out.isatty = lambda: True
+        with patch("builtins.input", return_value="y") as mock_input:
+            with patch("getpass.getpass", return_value="bar") as mock_getpass:
+                with patch("sys.stdout", new=fake_out):
+                    launcher._maybe_prompt_for_api_key()
+        mock_input.assert_called_once()
+        mock_getpass.assert_not_called()
+        self.assertEqual(os.environ.get("GITHUB_TOKEN"), "foo")
+
+    def test_prompt_with_saved_token_change_updates_file(self):
+        with open(self._token_file, "w", encoding="utf-8") as f:
+            f.write("export GITHUB_TOKEN='oldtoken'\n")
+
+        fake_out = io.StringIO()
+        fake_out.isatty = lambda: True
+        with patch("builtins.input", return_value="c") as mock_input:
+            with patch("getpass.getpass", return_value="newtoken") as mock_getpass:
+                with patch("sys.stdout", new=fake_out):
+                    launcher._maybe_prompt_for_api_key()
+
+        mock_input.assert_called_once()
+        mock_getpass.assert_called_once()
+        self.assertEqual(os.environ.get("GITHUB_TOKEN"), "newtoken")
+        with open(self._token_file, "r", encoding="utf-8") as f:
+            content = f.read()
+        self.assertIn("newtoken", content)
 
 
 if __name__ == "__main__":

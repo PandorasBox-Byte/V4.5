@@ -1,8 +1,8 @@
 {
-  "current_version": "5.1.0",
+  "current_version": "5.1.1",
   "major": 5,
   "minor": 1,
-  "patch": 0,
+  "patch": 1,
   "rules": {
     "major": "Major structural changes (non-engine architecture shifts)",
     "minor": "Feature-level and other minor changes",
@@ -29,6 +29,13 @@
       "from": "5.0.1",
       "to": "5.1.0",
       "reason": "Startup git-tag updater with TUI update-progress flow and auto-restart"
+    },
+    {
+      "date": "2026-02-27",
+      "change": "patch",
+      "from": "5.1.0",
+      "to": "5.1.1",
+      "reason": "Fix startup GitHub token persistence and reuse/change prompt"
     }
   ]
 }
