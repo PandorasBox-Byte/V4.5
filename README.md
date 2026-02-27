@@ -1,6 +1,24 @@
-# EvoAI V4.5
+# EvoAI V5.0.0 (V5)
 
 Local assistant runtime with memory, semantic similarity retrieval, optional local LLM generation, optional GitHub Models backend, plugin support, API server, and startup self-test.
+
+## Versioning tally system
+
+- Current release: `5.0.0` (`V5`)
+- Version format: `MAJOR.MINOR.PATCH`
+- `MAJOR`: increment for major structural changes (non-engine architecture shifts)
+- `MINOR`: increment for feature-level/minor changes
+- `PATCH`: increment for bug fixes
+
+Use:
+
+```bash
+python scripts/bump_version.py --change major --reason "describe the structural change"
+python scripts/bump_version.py --change minor --reason "describe the feature update"
+python scripts/bump_version.py --change patch --reason "describe the bug fix"
+```
+
+This updates both `version_tally.json` and `setup.cfg`.
 
 ## Quick start (single launcher)
 

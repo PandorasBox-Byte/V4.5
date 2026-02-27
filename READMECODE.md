@@ -1,7 +1,16 @@
 # READMECODE (Technical Context + Change History)
 
 This document is a technical handoff/reference for developers and AI assistants.
-It describes what EvoAI V4.5 is, how it starts, model/data flow, and major fixes made in this workspace.
+It describes what EvoAI V5.0.0 (V5) is, how it starts, model/data flow, and major fixes made in this workspace.
+
+## Versioning rule (project contract)
+
+- SemVer shape: `MAJOR.MINOR.PATCH`
+- `MAJOR`: increment for major structural changes (non-engine architecture shifts)
+- `MINOR`: increment for feature-level/minor changes
+- `PATCH`: increment for bug fixes
+- Source of truth files: `version_tally.json` and `setup.cfg`
+- Bump utility: `scripts/bump_version.py`
 
 ## 1) System purpose
 

@@ -1,0 +1,20 @@
+{
+  "current_version": "5.0.0",
+  "major": 5,
+  "minor": 0,
+  "patch": 0,
+  "rules": {
+    "major": "Major structural changes (non-engine architecture shifts)",
+    "minor": "Feature-level and other minor changes",
+    "patch": "Bug fixes"
+  },
+  "history": [
+    {
+      "date": "2026-02-27",
+      "change": "major",
+      "from": "4.5.0",
+      "to": "5.0.0",
+      "reason": "Major structural updates: backend migration, decision layer integration, startup/runtime contract changes"
+    }
+  ]
+}

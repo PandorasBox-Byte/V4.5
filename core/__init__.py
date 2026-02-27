@@ -1,4 +1,4 @@
-"""Core package init for V4.5 project.
+"""Core package init for V5 project.
 
 Compatibility shim: some versions of `huggingface_hub` removed `cached_download`.
 Provide a small alias to `hf_hub_download` if available so older imports keep working.
