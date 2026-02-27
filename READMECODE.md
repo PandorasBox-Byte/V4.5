@@ -1,7 +1,7 @@
 # READMECODE (Technical Context + Change History)
 
 This document is a technical handoff/reference for developers and AI assistants.
-It describes what EvoAI V5.1.2 (V5) is, how it starts, model/data flow, and major fixes made in this workspace.
+It describes what EvoAI V5.1.3 (V5) is, how it starts, model/data flow, and major fixes made in this workspace.
 
 ## Versioning rule (project contract)
 
@@ -19,6 +19,7 @@ It describes what EvoAI V5.1.2 (V5) is, how it starts, model/data flow, and majo
 - `5.1.0` **MINOR**: startup git-tag updater, loading-screen update phase, and restart-on-success behavior.
 - `5.1.1` **PATCH**: startup GitHub token persistence and reuse/change/skip prompt flow.
 - `5.1.2` **PATCH**: updater loop prevention after stash-pop by re-normalizing release version files.
+- `5.1.3` **PATCH**: launcher token prompt handling fixed for non-interactive mode and pre-set env tokens.
 
 ## Latest minor change (5.1.0)
 
@@ -38,6 +39,12 @@ It describes what EvoAI V5.1.2 (V5) is, how it starts, model/data flow, and majo
 - Fixed updater loop in `core/auto_updater.py` by enforcing release version files from the target tag after `stash pop` when needed.
 - Added launcher-side update guard in `core/launcher.py` to avoid repeated restart/update cycles for the same target version.
 - Added updater regression test in `tests/test_updater.py` for post-update version normalization.
+
+## Latest patch change (5.1.3)
+
+- Updated `core/launcher.py` to skip token prompting in non-interactive startup paths.
+- Updated `core/launcher.py` to skip prompting when `GITHUB_TOKEN`/`GH_TOKEN` is already set.
+- Added launcher tests for non-interactive startup behavior in `tests/test_launcher.py`.
 
 ## 1) System purpose
 

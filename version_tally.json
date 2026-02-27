@@ -1,8 +1,8 @@
 {
-  "current_version": "5.1.2",
+  "current_version": "5.1.3",
   "major": 5,
   "minor": 1,
-  "patch": 2,
+  "patch": 3,
   "rules": {
     "major": "Major structural changes (non-engine architecture shifts)",
     "minor": "Feature-level and other minor changes",
@@ -43,6 +43,13 @@
       "from": "5.1.1",
       "to": "5.1.2",
       "reason": "Fix startup updater loop by normalizing release version files after stash pop"
+    },
+    {
+      "date": "2026-02-27",
+      "change": "patch",
+      "from": "5.1.2",
+      "to": "5.1.3",
+      "reason": "Fix launcher token prompt behavior in non-interactive mode and when env token is pre-set"
     }
   ]
 }

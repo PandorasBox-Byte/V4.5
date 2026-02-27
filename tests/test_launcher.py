@@ -65,7 +65,9 @@ class LauncherTests(unittest.TestCase):
         with patch("getpass.getpass", return_value="   mykey   ") as mock_getpass:
             fake_out = io.StringIO()
             fake_out.isatty = lambda: True
-            with patch("sys.stdout", new=fake_out):
+            fake_in = io.StringIO()
+            fake_in.isatty = lambda: True
+            with patch("sys.stdout", new=fake_out), patch("sys.stdin", new=fake_in):
                 launcher._maybe_prompt_for_api_key()
             mock_getpass.assert_called_once()
             self.assertEqual(os.environ.get("GITHUB_TOKEN"), "mykey")
@@ -86,7 +88,9 @@ class LauncherTests(unittest.TestCase):
             fake_out = io.StringIO()
             # simulate being a TTY
             fake_out.isatty = lambda: True
-            with patch("sys.stdout", new=fake_out):
+            fake_in = io.StringIO()
+            fake_in.isatty = lambda: True
+            with patch("sys.stdout", new=fake_out), patch("sys.stdin", new=fake_in):
                 launcher._maybe_prompt_for_api_key()
             mock_getpass.assert_called_once()
             self.assertNotIn("GITHUB_TOKEN", os.environ)
@@ -127,13 +131,40 @@ class LauncherTests(unittest.TestCase):
         os.environ["GITHUB_TOKEN"] = "foo"
         fake_out = io.StringIO()
         fake_out.isatty = lambda: True
+        fake_in = io.StringIO()
+        fake_in.isatty = lambda: True
         with patch("builtins.input", return_value="y") as mock_input:
             with patch("getpass.getpass", return_value="bar") as mock_getpass:
-                with patch("sys.stdout", new=fake_out):
+                with patch("sys.stdout", new=fake_out), patch("sys.stdin", new=fake_in):
                     launcher._maybe_prompt_for_api_key()
-        mock_input.assert_called_once()
+        mock_input.assert_not_called()
         mock_getpass.assert_not_called()
         self.assertEqual(os.environ.get("GITHUB_TOKEN"), "foo")
+
+    def test_noninteractive_with_env_token_skips_prompt(self):
+        os.environ["GITHUB_TOKEN"] = "fromenv"
+        fake_out = io.StringIO()
+        fake_out.isatty = lambda: False
+        fake_in = io.StringIO()
+        fake_in.isatty = lambda: False
+        with patch("builtins.input") as mock_input, patch("getpass.getpass") as mock_getpass:
+            with patch("sys.stdout", new=fake_out), patch("sys.stdin", new=fake_in):
+                launcher._maybe_prompt_for_api_key()
+        mock_input.assert_not_called()
+        mock_getpass.assert_not_called()
+        self.assertEqual(os.environ.get("GITHUB_TOKEN"), "fromenv")
+
+    def test_noninteractive_without_token_skips_prompt(self):
+        fake_out = io.StringIO()
+        fake_out.isatty = lambda: False
+        fake_in = io.StringIO()
+        fake_in.isatty = lambda: False
+        with patch("builtins.input") as mock_input, patch("getpass.getpass") as mock_getpass:
+            with patch("sys.stdout", new=fake_out), patch("sys.stdin", new=fake_in):
+                launcher._maybe_prompt_for_api_key()
+        mock_input.assert_not_called()
+        mock_getpass.assert_not_called()
+        self.assertNotIn("GITHUB_TOKEN", os.environ)
 
     def test_update_restart_guard_clears_when_version_already_applied(self):
         os.environ["EVOAI_UPDATED_TARGET_VERSION"] = "5.1.2"
@@ -170,9 +201,11 @@ class LauncherTests(unittest.TestCase):
 
         fake_out = io.StringIO()
         fake_out.isatty = lambda: True
+        fake_in = io.StringIO()
+        fake_in.isatty = lambda: True
         with patch("builtins.input", return_value="c") as mock_input:
             with patch("getpass.getpass", return_value="newtoken") as mock_getpass:
-                with patch("sys.stdout", new=fake_out):
+                with patch("sys.stdout", new=fake_out), patch("sys.stdin", new=fake_in):
                     launcher._maybe_prompt_for_api_key()
 
         mock_input.assert_called_once()

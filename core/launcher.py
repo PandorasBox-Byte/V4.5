@@ -180,21 +180,39 @@ def _maybe_prompt_for_api_key() -> None:
     if _prompted_for_key:
         return
 
-    if sys.stdout.isatty():
+    env_token = (os.environ.get("GITHUB_TOKEN") or os.environ.get("GH_TOKEN") or "").strip()
+    if env_token:
+        os.environ["GITHUB_TOKEN"] = env_token
+        os.environ.pop("GH_TOKEN", None)
+        _prompted_for_key = True
+        return
+
+    stdin_tty = getattr(sys.stdin, "isatty", lambda: False)()
+    stdout_tty = getattr(sys.stdout, "isatty", lambda: False)()
+    if not (stdin_tty and stdout_tty):
+        _prompted_for_key = True
+        return
+
+    if stdout_tty:
         try:
             import getpass
 
-            env_token = (os.environ.get("GITHUB_TOKEN") or os.environ.get("GH_TOKEN") or "").strip()
             saved_token = _load_saved_token()
-            base_token = env_token or saved_token or ""
+            base_token = saved_token or ""
 
             if base_token:
-                choice = input("Use saved GitHub token? [Y=use / C=change / S=skip]: ").strip().lower()
+                try:
+                    choice = input("Use saved GitHub token? [Y=use / C=change / S=skip]: ").strip().lower()
+                except EOFError:
+                    choice = "y"
                 if choice in ("", "y", "yes"):
                     os.environ["GITHUB_TOKEN"] = base_token
                     os.environ.pop("GH_TOKEN", None)
                 elif choice in ("c", "change", "n", "no"):
-                    key = getpass.getpass("Paste new GitHub token (leave empty to skip): ")
+                    try:
+                        key = getpass.getpass("Paste new GitHub token (leave empty to skip): ")
+                    except EOFError:
+                        key = ""
                     if key and key.strip():
                         token = key.strip()
                         os.environ["GITHUB_TOKEN"] = token
@@ -210,7 +228,10 @@ def _maybe_prompt_for_api_key() -> None:
                     os.environ.pop("GH_TOKEN", None)
                     print("[launcher] continuing without GitHub token")
             else:
-                key = getpass.getpass("Paste your GitHub token (leave empty to skip): ")
+                try:
+                    key = getpass.getpass("Paste your GitHub token (leave empty to skip): ")
+                except EOFError:
+                    key = ""
                 if key and key.strip():
                     token = key.strip()
                     os.environ["GITHUB_TOKEN"] = token
