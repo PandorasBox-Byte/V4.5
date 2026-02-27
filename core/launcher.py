@@ -406,13 +406,6 @@ def main():
 
             def _make_engine():
                 try:
-                    while not loader.update_done:
-                        time.sleep(0.05)
-
-                    if loader.restart_requested:
-                        loader.report(1.0, "Restarting to apply update", phase="update")
-                        return
-
                     loader.report(0.0, "Loading engine", phase="startup")
                     # Suppress noisy third-party stdout/stderr during loader startup
                     # (sentence-transformers / huggingface warnings), which can
@@ -451,6 +444,8 @@ def main():
             else:
                 # fallback: wait until engine is ready then set engine variable
                 maker.join()
+                while not loader.update_done:
+                    time.sleep(0.05)
                 if loader.restart_requested:
                     _restart_launcher_process()
                 engine = loader.engine

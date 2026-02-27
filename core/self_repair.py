@@ -96,8 +96,9 @@ class SelfRepair:
                         bad_rows += 1
                 if bad_rows:
                     return False, f"memory contains {bad_rows} non-dict rows"
-                # no-op save/write check
-                save_memory(mem, max_entries=max(1, len(mem) or 1))
+                if mode == "repair":
+                    # In repair mode we still exercise write path to validate persistence.
+                    save_memory(mem, max_entries=max(1, len(mem) or 1))
                 return True, f"memory entries={len(mem)}"
             except Exception as e:
                 return False, str(e)

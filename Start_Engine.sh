@@ -37,8 +37,10 @@ if [ ! -d "$VENV" ]; then
   CREATED_VENV=1
 fi
 
-# Ensure pip tooling is up-to-date
-"$VENV/bin/python" -m pip install --upgrade pip setuptools wheel >/dev/null 2>&1 || true
+# Ensure pip tooling is up-to-date only on first create or explicit request
+if [ "$CREATED_VENV" -eq 1 ] || [ "${EVOAI_FORCE_TOOLCHAIN_UPGRADE:-0}" = "1" ]; then
+  "$VENV/bin/python" -m pip install --upgrade pip setuptools wheel >/dev/null 2>&1 || true
+fi
 
 # Install requirements only on venv creation or when explicitly forced
 if [ "$CREATED_VENV" -eq 1 ] || [ "${EVOAI_FORCE_INSTALL:-0}" = "1" ]; then

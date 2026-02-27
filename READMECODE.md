@@ -1,7 +1,7 @@
 # READMECODE (Technical Context + Change History)
 
 This document is a technical handoff/reference for developers and AI assistants.
-It describes what EvoAI V5.1.4 (V5) is, how it starts, model/data flow, and major fixes made in this workspace.
+It describes what EvoAI V6.0.0 (V6) is, how it starts, model/data flow, and major fixes made in this workspace.
 
 ## Versioning rule (project contract)
 
@@ -14,6 +14,7 @@ It describes what EvoAI V5.1.4 (V5) is, how it starts, model/data flow, and majo
 
 ## Release history (major/minor/patch)
 
+- `6.0.0` **MAJOR**: deep optimization pass across runtime persistence, startup latency, plugin/API routing efficiency, and startup script consolidation.
 - `5.0.0` **MAJOR**: backend migration + decision layer integration + startup/runtime contract changes.
 - `5.0.1` **PATCH**: TUI version label and startup checklist grid rendering updates.
 - `5.1.0` **MINOR**: startup git-tag updater, loading-screen update phase, and restart-on-success behavior.
@@ -21,6 +22,16 @@ It describes what EvoAI V5.1.4 (V5) is, how it starts, model/data flow, and majo
 - `5.1.2` **PATCH**: updater loop prevention after stash-pop by re-normalizing release version files.
 - `5.1.3` **PATCH**: launcher token prompt handling fixed for non-interactive mode and pre-set env tokens.
 - `5.1.4` **PATCH**: updater normalization extended to tracked non-runtime files to prevent partial updates.
+
+## Latest major change (6.0.0)
+
+- Updated `core/engine_template.py` to reduce repeated training-capture file reads and batch memory/embedding persistence with timed/turn-based flush plus process-exit flush.
+- Updated `core/launcher.py` startup flow so engine loading in interactive mode does not block on updater completion.
+- Updated `core/language_utils.py` with cached WordNet readiness and cached synonym lookup results.
+- Updated `plugins/knowledge_plugin.py` with low-cost keyword prefiltering before semantic similarity scoring.
+- Updated `core/api_server.py` route matching path to avoid per-request URL parsing overhead.
+- Updated `Start_Engine.sh` to avoid unconditional pip toolchain upgrade on every launch.
+- Consolidated script/tool wrappers in `scripts/run_trained_models.sh` and `tools/monitor.py`, and removed `backup_removed_files/` legacy artifacts.
 
 ## Latest minor change (5.1.0)
 

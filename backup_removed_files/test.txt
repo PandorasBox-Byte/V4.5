@@ -1,4 +1,0 @@
-# Backup of /test.txt
-# Backed up on 2026-02-26
-
-This is a test file

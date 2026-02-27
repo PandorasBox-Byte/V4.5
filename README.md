@@ -1,10 +1,10 @@
-# EvoAI V5.1.4 (V5)
+# EvoAI V6.0.0 (V6)
 
 Local assistant runtime with memory, semantic similarity retrieval, optional local LLM generation, optional GitHub Models backend, plugin support, API server, and startup self-test.
 
 ## Versioning tally system
 
-- Current release: `5.1.4` (`V5`)
+- Current release: `6.0.0` (`V6`)
 - Version format: `MAJOR.MINOR.PATCH`
 - `MAJOR`: increment for major structural changes (non-engine architecture shifts)
 - `MINOR`: increment for feature-level/minor changes
@@ -20,7 +20,15 @@ python scripts/bump_version.py --change patch --reason "describe the bug fix"
 
 This updates both `version_tally.json` and `setup.cfg`.
 
-## Latest patch summary (5.1.4)
+## Latest major summary (6.0.0)
+
+- Per-turn runtime optimized with batched memory/embedding persistence plus safe exit flush.
+- Startup path optimized by removing loader wait on updater completion in interactive mode.
+- Language utilities optimized with WordNet readiness caching and synonym result caching.
+- Knowledge plugin routing optimized with lightweight keyword prefiltering before semantic scoring.
+- Startup script and monitor/train wrappers simplified to reduce duplicate paths and startup overhead.
+
+## Previous patch summary (5.1.4)
 
 - Fixed partial-update behavior: after `stash pop`, updater now normalizes tracked non-runtime files to the target tag.
 - Preserves runtime-local files under `data/` while restoring code/docs to the release state.
@@ -40,6 +48,7 @@ This updates both `version_tally.json` and `setup.cfg`.
 
 ## Release history (major/minor/patch)
 
+- `6.0.0` **MAJOR**: runtime/startup optimization pass, plugin/API efficiency improvements, startup script consolidation, and cleanup of legacy backup artifacts.
 - `5.0.0` **MAJOR**: backend/architecture shift (GitHub backend integration, decision layer, startup/runtime contract updates).
 - `5.0.1` **PATCH**: TUI version label + startup checklist grid layout improvements.
 - `5.1.0` **MINOR**: startup git-tag updater + update progress screen + auto-restart flow.

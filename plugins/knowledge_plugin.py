@@ -53,6 +53,7 @@ class KnowledgePlugin(ResearchPlugin):
     def __init__(self):
         self._lines = []
         self._embeddings = None
+        self._keywords = set()
 
         path = os.path.join("data", "knowledge.txt")
         if os.path.exists(path):
@@ -62,14 +63,29 @@ class KnowledgePlugin(ResearchPlugin):
             except Exception:
                 self._lines = []
 
+        for line in self._lines:
+            for token in line.lower().split():
+                token = token.strip(".,!?;:'\"()[]{}")
+                if len(token) >= 3:
+                    self._keywords.add(token)
+
     def _ensure_embeddings(self, engine):
         if self._embeddings is None and self._lines:
             self._embeddings = engine._encode(self._lines)
 
     def can_handle(self, query: str) -> bool:
-        # This plugin is willing to look at every query but only returns a
-        # response when it finds a strong match.
-        return True
+        if not self._lines:
+            return False
+        lowered = (query or "").lower()
+        if not lowered.strip():
+            return False
+        if not self._keywords:
+            return True
+        for token in lowered.split():
+            token = token.strip(".,!?;:'\"()[]{}")
+            if token in self._keywords:
+                return True
+        return False
 
     def handle(self, query: str, engine) -> str | None:
         if not self._lines:

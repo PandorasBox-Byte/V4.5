@@ -1,4 +1,6 @@
 import random
+from functools import lru_cache
+
 try:
     import nltk
     from nltk.corpus import wordnet as wn
@@ -7,28 +9,58 @@ except Exception:  # pragma: no cover - optional dependency
     wn = None
 
 
+_WORDNET_READY: bool | None = None
+
+
 def ensure_wordnet():
     """Make sure WordNet data is available, downloading if necessary."""
+    global _WORDNET_READY
+
+    if _WORDNET_READY is True:
+        return
+    if _WORDNET_READY is False:
+        return
+
     if nltk is None or wn is None:
+        _WORDNET_READY = False
         return
     try:
         # simple access will raise LookupError if not present
         wn.synsets("test")
+        _WORDNET_READY = True
     except LookupError:
-        nltk.download("wordnet", quiet=True)
-        nltk.download("omw-1.4", quiet=True)
+        try:
+            nltk.download("wordnet", quiet=True)
+            nltk.download("omw-1.4", quiet=True)
+            wn.synsets("test")
+            _WORDNET_READY = True
+        except Exception:
+            _WORDNET_READY = False
+
+
+@lru_cache(maxsize=1024)
+def _cached_synonyms(word: str) -> tuple[str, ...]:
+    ensure_wordnet()
+    if _WORDNET_READY is not True:
+        return (word,)
+
+    syns = set()
+    for syn in wn.synsets(word):
+        for lemma in syn.lemmas():
+            syns.add(lemma.name().replace("_", " "))
+    if not syns:
+        return (word,)
+    return tuple(sorted(syns))
 
 
 def get_synonyms(word: str) -> list[str]:
     """Return a list of synonyms for *word* using WordNet."""
     if nltk is None or wn is None:
         return [word]
-    ensure_wordnet()
-    syns = set()
-    for syn in wn.synsets(word):
-        for lemma in syn.lemmas():
-            syns.add(lemma.name().replace("_", " "))
-    return sorted(syns)
+    normalized = (word or "").strip().lower()
+    if not normalized:
+        return [word]
+    return list(_cached_synonyms(normalized))
 
 
 def enhance_text(text: str) -> str:

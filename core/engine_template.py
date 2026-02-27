@@ -1,4 +1,5 @@
 import os
+import atexit
 import signal
 import sys
 import math
@@ -471,6 +472,22 @@ class Engine:
         # Persistent memory and in-memory embedding cache
         self.memory = load_memory()
         self.corpus_texts = [entry.get("user", "") for entry in self.memory]
+        self._persist_every = max(1, int(os.environ.get("EVOAI_PERSIST_EVERY", "2")))
+        self._persist_max_delay_sec = max(
+            0.0,
+            float(os.environ.get("EVOAI_PERSIST_MAX_DELAY_SEC", "2.0")),
+        )
+        self._pending_persist_turns = 0
+        self._dirty_memory = False
+        self._dirty_embeddings = False
+        self._last_persist_ts = time.monotonic()
+        self._flush_registered = False
+        if not self._flush_registered:
+            try:
+                atexit.register(self._flush_persistence, True)
+                self._flush_registered = True
+            except Exception:
+                pass
         self._set_status("memory", "loaded")
 
         # Try to load persisted embeddings from disk (keeps consistent with memory)
@@ -661,37 +678,53 @@ class Engine:
         )
         max_rows = int(os.environ.get("EVOAI_TRAINING_MAX_ROWS", "5000"))
 
-        rows = []
-        try:
-            if os.path.exists(data_path):
-                with open(data_path, "r", encoding="utf-8") as f:
-                    existing = json.load(f)
-                if isinstance(existing, list):
-                    rows = existing
-        except Exception:
+        rows = getattr(self, "_training_rows_cache", None)
+        if rows is None:
             rows = []
+            try:
+                if os.path.exists(data_path):
+                    with open(data_path, "r", encoding="utf-8") as f:
+                        existing = json.load(f)
+                    if isinstance(existing, list):
+                        rows = existing
+            except Exception:
+                rows = []
+            self._training_rows_cache = rows
+        elif not isinstance(rows, list):
+            rows = []
+            self._training_rows_cache = rows
 
         rows.append([str(user_text), str(reply)])
         if max_rows > 0 and len(rows) > max_rows:
-            rows = rows[-max_rows:]
+            rows[:] = rows[-max_rows:]
 
         os.makedirs(os.path.dirname(data_path), exist_ok=True)
         with open(data_path, "w", encoding="utf-8") as f:
             json.dump(rows, f, ensure_ascii=False, indent=2)
 
-        meta = {
-            "new_samples_since_train": 0,
-            "total_captured": 0,
-            "last_capture_ts": 0,
-        }
-        try:
-            if os.path.exists(meta_path):
-                with open(meta_path, "r", encoding="utf-8") as f:
-                    existing_meta = json.load(f)
-                if isinstance(existing_meta, dict):
-                    meta.update(existing_meta)
-        except Exception:
-            pass
+        meta = getattr(self, "_training_meta_cache", None)
+        if meta is None:
+            meta = {
+                "new_samples_since_train": 0,
+                "total_captured": 0,
+                "last_capture_ts": 0,
+            }
+            try:
+                if os.path.exists(meta_path):
+                    with open(meta_path, "r", encoding="utf-8") as f:
+                        existing_meta = json.load(f)
+                    if isinstance(existing_meta, dict):
+                        meta.update(existing_meta)
+            except Exception:
+                pass
+            self._training_meta_cache = meta
+        elif not isinstance(meta, dict):
+            meta = {
+                "new_samples_since_train": 0,
+                "total_captured": 0,
+                "last_capture_ts": 0,
+            }
+            self._training_meta_cache = meta
 
         meta["new_samples_since_train"] = int(meta.get("new_samples_since_train", 0)) + 1
         meta["total_captured"] = int(meta.get("total_captured", 0)) + 1
@@ -879,6 +912,44 @@ class Engine:
         t.start()
         return t
 
+    def _flush_persistence(self, force: bool = False) -> None:
+        if not force and not (self._dirty_memory or self._dirty_embeddings):
+            return
+
+        now = time.monotonic()
+        if not force:
+            if (
+                self._pending_persist_turns < self._persist_every
+                and (now - self._last_persist_ts) < self._persist_max_delay_sec
+            ):
+                return
+
+        memory_ok = not self._dirty_memory
+        embeddings_ok = (
+            not self._dirty_embeddings
+            or self.embeddings_cache is None
+        )
+
+        if self._dirty_memory:
+            try:
+                save_memory(self.memory)
+                memory_ok = True
+            except Exception:
+                pass
+
+        if self._dirty_embeddings and self.embeddings_cache is not None:
+            try:
+                save_embeddings(self.embeddings_cache)
+                embeddings_ok = True
+            except Exception:
+                pass
+
+        if memory_ok and embeddings_ok:
+            self._pending_persist_turns = 0
+            self._dirty_memory = False
+            self._dirty_embeddings = False
+            self._last_persist_ts = time.monotonic()
+
     def record_interaction(self, user_text: str, reply: str) -> None:
         """Store a user/assistant turn and update embeddings.
 
@@ -899,7 +970,7 @@ class Engine:
                 if isinstance(entry, dict) and "user" in entry
             )
         self.memory = prune_memory(self.memory, self.max_memory_entries)
-        save_memory(self.memory)
+        self._dirty_memory = True
 
         # update repetition trackers
         self.last_user = user_text
@@ -937,13 +1008,17 @@ class Engine:
                     self.embeddings_cache = [emb]
                 else:
                     self.embeddings_cache.append(emb)
-            save_embeddings(self.embeddings_cache)
+            self._dirty_embeddings = True
         except Exception:  # noqa: BLE001
             try:
                 clear_cache()
             except Exception:
                 pass
             self.embeddings_cache = None
+            self._dirty_embeddings = False
+
+        self._pending_persist_turns += 1
+        self._flush_persistence(force=False)
 
         # (moved out into __init__)
     def respond(self, text):

@@ -9,7 +9,6 @@ import json
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from socketserver import ThreadingMixIn
 import threading
-from urllib.parse import urlparse
 
 from core.engine_template import Engine
 
@@ -21,14 +20,17 @@ class ThreadedHTTPServer(ThreadingMixIn, HTTPServer):
 class ChatHandler(BaseHTTPRequestHandler):
     server_version = "EvoAI/0.1"
 
+    @staticmethod
+    def _path_only(raw_path: str) -> str:
+        return (raw_path or "").split("?", 1)[0]
+
     def _set_json(self, status=200):
         self.send_response(status)
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.end_headers()
 
     def do_GET(self):
-        parsed = urlparse(self.path)
-        if parsed.path == "/status":
+        if self._path_only(self.path) == "/status":
             self._set_json(200)
             try:
                 data = self.server.engine.status()
@@ -40,8 +42,7 @@ class ChatHandler(BaseHTTPRequestHandler):
             self.wfile.write(json.dumps({"error": "not found"}).encode())
 
     def do_POST(self):
-        parsed = urlparse(self.path)
-        if parsed.path != "/chat":
+        if self._path_only(self.path) != "/chat":
             self._set_json(404)
             self.wfile.write(json.dumps({"error": "not found"}).encode())
             return
