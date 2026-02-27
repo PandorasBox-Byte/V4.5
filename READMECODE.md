@@ -1,7 +1,7 @@
 # READMECODE (Technical Context + Change History)
 
 This document is a technical handoff/reference for developers and AI assistants.
-It describes what EvoAI V5.0.0 (V5) is, how it starts, model/data flow, and major fixes made in this workspace.
+It describes what EvoAI V5.1.0 (V5) is, how it starts, model/data flow, and major fixes made in this workspace.
 
 ## Versioning rule (project contract)
 
@@ -11,6 +11,13 @@ It describes what EvoAI V5.0.0 (V5) is, how it starts, model/data flow, and majo
 - `PATCH`: increment for bug fixes
 - Source of truth files: `version_tally.json` and `setup.cfg`
 - Bump utility: `scripts/bump_version.py`
+
+## Latest minor change (5.1.0)
+
+- Added startup git updater pipeline in `core/auto_updater.py` based on remote SemVer tags.
+- Added update phase wiring in `core/launcher.py` before engine construction.
+- Added dedicated update loading screen in `core/tui.py` and launcher restart action after successful update.
+- Update detection does not change local version number automatically; release number still comes from `version_tally.json` / `setup.cfg`.
 
 ## 1) System purpose
 

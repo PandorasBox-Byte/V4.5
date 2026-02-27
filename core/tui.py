@@ -137,6 +137,7 @@ def _draw_input(win, prompt: str, buffer: str, version_label: str = ""):
 
 def run(engine_or_loader, stdscr=None):
     def _main(stdscr_inner):
+        restart_action = None
         curses.curs_set(1)
         stdscr_inner.nodelay(False)
         stdscr_inner.clear()
@@ -222,6 +223,7 @@ def run(engine_or_loader, stdscr=None):
             pass
 
         test_message = "Starting up..."
+        update_mode_active = False
 
         def draw_bar(frac: float, ok: bool | None = None):
             filled = int(frac * bar_w)
@@ -241,6 +243,31 @@ def run(engine_or_loader, stdscr=None):
                 stdscr_inner.addstr(bar_row + 1, x, " " * bar_w)
                 if msg:
                     stdscr_inner.addstr(bar_row + 1, max(0, (maxx - len(msg)) // 2), msg)
+                stdscr_inner.refresh()
+            except curses.error:
+                pass
+
+        def draw_update_screen(frac: float, msg: str, done: bool = False, ok: bool = False):
+            stdscr_inner.erase()
+            header = "Checking for updates"
+            try:
+                stdscr_inner.addstr(max(0, start_row - 1), max(0, (maxx - len(header)) // 2), header)
+            except curses.error:
+                pass
+
+            filled = int(max(0.0, min(1.0, frac)) * bar_w)
+            empty = bar_w - filled
+            x = max(0, (maxx - bar_w) // 2)
+            try:
+                stdscr_inner.addstr(bar_row, x, "[")
+                stdscr_inner.addstr(bar_row, x + 1, "#" * filled, curses.color_pair(1))
+                stdscr_inner.addstr(bar_row, x + 1 + filled, "-" * empty)
+                stdscr_inner.addstr(bar_row, x + 1 + bar_w, "]")
+                status = (msg or "").strip()
+                if done:
+                    status = f"{'Update successful' if ok else 'Update failed'}: {status}" if status else ("Update successful" if ok else "Update failed")
+                stdscr_inner.addstr(bar_row + 1, x, " " * bar_w)
+                stdscr_inner.addstr(bar_row + 1, max(0, (maxx - len(status)) // 2), status[:maxx])
                 stdscr_inner.refresh()
             except curses.error:
                 pass
@@ -330,6 +357,40 @@ def run(engine_or_loader, stdscr=None):
 
         # progress loop: combine model (70%) and tests (30%) into overall bar
         while True:
+            if is_loader and loader is not None:
+                phase = str(getattr(loader, "phase", "startup") or "startup")
+                if phase == "update":
+                    update_mode_active = True
+                    frac = float(getattr(loader, "progress", 0.0) or 0.0)
+                    msg = str(getattr(loader, "message", "Updating...") or "Updating...")
+                    done = bool(getattr(loader, "update_done", False))
+                    ok = bool(getattr(loader, "update_success", False))
+                    draw_update_screen(frac, msg, done=done, ok=ok)
+
+                    if done and bool(getattr(loader, "restart_requested", False)):
+                        restart_action = "restart"
+                        time.sleep(0.35)
+                        break
+
+                    if done and not bool(getattr(loader, "restart_requested", False)):
+                        time.sleep(0.45)
+                        try:
+                            loader.phase = "startup"
+                            loader.progress = 0.0
+                            loader.message = "Starting up..."
+                        except Exception:
+                            pass
+                        stdscr_inner.erase()
+                        for idx, line in enumerate(title_lines):
+                            try:
+                                stdscr_inner.addstr(start_row + idx, max(0, (maxx - len(line)) // 2), line)
+                            except curses.error:
+                                pass
+                        stdscr_inner.refresh()
+                        update_mode_active = False
+                    time.sleep(0.08)
+                    continue
+
             # model progress
             if is_loader and loader is not None:
                 try:
@@ -399,6 +460,9 @@ def run(engine_or_loader, stdscr=None):
             # no tests available; show full bar
             draw_bar(1.0, True)
             time.sleep(0.35)
+
+        if restart_action == "restart":
+            return restart_action
 
         while True:
             maxy, maxx = stdscr_inner.getmaxyx()
@@ -512,9 +576,8 @@ def run(engine_or_loader, stdscr=None):
     os.environ["EVOAI_TUI_ACTIVE"] = "1"
     try:
         if stdscr is None:
-            curses.wrapper(_main)
-        else:
-            _main(stdscr)
+            return curses.wrapper(_main)
+        return _main(stdscr)
     finally:
         if prev_tui is None:
             os.environ.pop("EVOAI_TUI_ACTIVE", None)

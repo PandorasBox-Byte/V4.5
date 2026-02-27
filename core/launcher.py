@@ -7,6 +7,7 @@ import subprocess
 import io
 import contextlib
 import warnings
+import threading
 
 # When this file is executed as a script (python core/launcher.py),
 # Python sets sys.path[0] to the script's directory (core/). That makes
@@ -21,6 +22,7 @@ if __name__ == "__main__" and __package__ is None:
 
 from core.engine_template import Engine
 from core.self_repair import SelfRepair
+from core.auto_updater import run_startup_git_update
 from core import tui
 
 PIDFILE = os.path.join("data", "engine.pid")
@@ -44,6 +46,11 @@ def handle_exit(sig, frame):
     print("\nShutting down EvoAI (launcher cleanup)...")
     remove_pidfile()
     sys.exit(0)
+
+
+def _restart_launcher_process() -> None:
+    remove_pidfile()
+    os.execv(sys.executable, [sys.executable, *sys.argv])
 
 
 # internal flag preventing repeated prompting
@@ -220,13 +227,21 @@ def main():
                     self.engine = None
                     self.progress = 0.0
                     self.message = "starting"
+                    self.phase = "startup"
                     self.pass_list = {}
+                    self.update_done = False
+                    self.update_success = False
+                    self.update_error = ""
+                    self.restart_requested = False
                     self._ready = False
 
                 def report(self, frac, msg="", **kwargs):
                     try:
                         self.progress = float(frac)
                         self.message = str(msg)
+                        phase = kwargs.get("phase")
+                        if phase:
+                            self.phase = str(phase)
                         # optional check updates
                         check = kwargs.get('check_name')
                         passed = kwargs.get('passed')
@@ -245,12 +260,47 @@ def main():
 
             loader = EngineLoader()
 
+            def _run_update_phase():
+                enabled = os.environ.get("EVOAI_ENABLE_STARTUP_GIT_UPDATE", "1").lower() in ("1", "true", "yes")
+                if not enabled:
+                    loader.update_done = True
+                    return
+
+                remote = os.environ.get("EVOAI_GIT_REMOTE", "origin")
+
+                def _update_progress(frac: float, msg: str):
+                    loader.report(frac, msg, phase="update")
+
+                result = run_startup_git_update(progress_cb=_update_progress, remote=remote)
+                loader.update_success = bool(result.success)
+                loader.update_error = result.failed_reason or ""
+                loader.update_done = True
+
+                if result.updated and result.success and result.needs_restart:
+                    loader.restart_requested = True
+                    loader.report(1.0, f"Update successful: v{result.remote_version}", phase="update")
+                elif not result.success:
+                    loader.report(1.0, f"Update failed: {loader.update_error}", phase="update")
+                else:
+                    loader.report(1.0, "No update required", phase="update")
+
+            update_thread = threading.Thread(target=_run_update_phase, daemon=True)
+            update_thread.start()
+
             # Reduce noisy third-party logging during startup loader mode.
             os.environ.setdefault("HF_HUB_DISABLE_PROGRESS_BARS", "1")
             os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
 
             def _make_engine():
                 try:
+                    while not loader.update_done:
+                        time.sleep(0.05)
+
+                    if loader.restart_requested:
+                        loader.report(1.0, "Restarting to apply update", phase="update")
+                        return
+
+                    loader.report(0.0, "Loading engine", phase="startup")
                     # Suppress noisy third-party stdout/stderr during loader startup
                     # (sentence-transformers / huggingface warnings), which can
                     # corrupt the curses UI if written while TUI is active.
@@ -263,15 +313,15 @@ def main():
                     # ensure loader shows failure
                     loader.report(1.0, "failed")
 
-            import threading
-
             maker = threading.Thread(target=_make_engine, daemon=True)
             maker.start()
 
             # Pass the loader into the TUI; it will wait for the engine to become ready
             if _has_interactive_tty():
                 try:
-                    tui.run(loader)
+                    tui_action = tui.run(loader)
+                    if tui_action == "restart" or loader.restart_requested:
+                        _restart_launcher_process()
                     engine = loader.engine
                     break
                 except KeyboardInterrupt:
@@ -279,6 +329,8 @@ def main():
                 except Exception as e:
                     print(f"[launcher] TUI unavailable, falling back to REPL: {e}")
                     maker.join()
+                    if loader.restart_requested:
+                        _restart_launcher_process()
                     engine = loader.engine
                     if engine is None:
                         raise RuntimeError("engine failed to initialize")
@@ -286,6 +338,8 @@ def main():
             else:
                 # fallback: wait until engine is ready then set engine variable
                 maker.join()
+                if loader.restart_requested:
+                    _restart_launcher_process()
                 engine = loader.engine
                 if engine is None:
                     raise RuntimeError("engine failed to initialize")

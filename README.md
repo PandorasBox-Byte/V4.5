@@ -1,10 +1,10 @@
-# EvoAI V5.0.1 (V5)
+# EvoAI V5.1.0 (V5)
 
 Local assistant runtime with memory, semantic similarity retrieval, optional local LLM generation, optional GitHub Models backend, plugin support, API server, and startup self-test.
 
 ## Versioning tally system
 
-- Current release: `5.0.1` (`V5`)
+- Current release: `5.1.0` (`V5`)
 - Version format: `MAJOR.MINOR.PATCH`
 - `MAJOR`: increment for major structural changes (non-engine architecture shifts)
 - `MINOR`: increment for feature-level/minor changes
@@ -20,7 +20,14 @@ python scripts/bump_version.py --change patch --reason "describe the bug fix"
 
 This updates both `version_tally.json` and `setup.cfg`.
 
-## Latest patch summary (5.0.1)
+## Latest minor summary (5.1.0)
+
+- Added startup GitHub update checks using latest SemVer tag comparison.
+- Added git-delta update flow (changed/new files + upstream deletions) with auto-stash/pop handling.
+- Added dedicated TUI update screen during loading with green progress bar and success/failure status.
+- Added automatic launcher restart after successful update so updated engine code is loaded immediately.
+
+## Previous patch summary (5.0.1)
 
 - Added version number in the TUI bottom-left corner.
 - Reworked startup self-test checklist from a list into a cleaner grid layout.
