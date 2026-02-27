@@ -184,6 +184,45 @@ def _enforce_release_version_files(target_tag: str, root: Path) -> tuple[bool, s
     return True, ""
 
 
+def _is_runtime_local_path(path: str) -> bool:
+    normalized = path.replace("\\", "/").lstrip("./")
+    return normalized.startswith("data/")
+
+
+def _parse_porcelain_paths(status_output: str) -> list[str]:
+    paths: list[str] = []
+    for raw in status_output.splitlines():
+        line = raw.rstrip()
+        if not line or len(line) < 4:
+            continue
+        code = line[:2]
+        payload = line[3:]
+        if code == "??":
+            continue
+        if " -> " in payload:
+            payload = payload.split(" -> ", 1)[1]
+        payload = payload.strip()
+        if payload:
+            paths.append(payload)
+    return paths
+
+
+def _normalize_tracked_nonlocal_files(target_tag: str, root: Path) -> tuple[bool, str]:
+    code, status, err = _run_git(["status", "--porcelain"], cwd=root)
+    if code != 0:
+        return False, (err or "git status failed during normalization")
+
+    changed = _parse_porcelain_paths(status)
+    to_restore = [p for p in changed if not _is_runtime_local_path(p)]
+    if not to_restore:
+        return True, ""
+
+    code, _out, err = _run_git(["checkout", target_tag, "--", *to_restore], cwd=root, timeout=60)
+    if code != 0:
+        return False, (err or "failed to normalize tracked files from target tag")
+    return True, ""
+
+
 def run_startup_git_update(
     progress_cb: Callable[[float, str], None] | None = None,
     remote: str = "origin",
@@ -285,6 +324,14 @@ def run_startup_git_update(
             if code != 0:
                 result.success = False
                 result.failed_reason = err or out or "stash pop conflict"
+                _progress(1.0, f"Update failed: {result.failed_reason}")
+                return result
+
+            _progress(0.90, "Normalizing updated files...")
+            ok, reason = _normalize_tracked_nonlocal_files(target_tag, root)
+            if not ok:
+                result.success = False
+                result.failed_reason = reason
                 _progress(1.0, f"Update failed: {result.failed_reason}")
                 return result
 

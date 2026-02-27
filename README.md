@@ -1,10 +1,10 @@
-# EvoAI V5.1.3 (V5)
+# EvoAI V5.1.4 (V5)
 
 Local assistant runtime with memory, semantic similarity retrieval, optional local LLM generation, optional GitHub Models backend, plugin support, API server, and startup self-test.
 
 ## Versioning tally system
 
-- Current release: `5.1.3` (`V5`)
+- Current release: `5.1.4` (`V5`)
 - Version format: `MAJOR.MINOR.PATCH`
 - `MAJOR`: increment for major structural changes (non-engine architecture shifts)
 - `MINOR`: increment for feature-level/minor changes
@@ -20,7 +20,13 @@ python scripts/bump_version.py --change patch --reason "describe the bug fix"
 
 This updates both `version_tally.json` and `setup.cfg`.
 
-## Latest patch summary (5.1.3)
+## Latest patch summary (5.1.4)
+
+- Fixed partial-update behavior: after `stash pop`, updater now normalizes tracked non-runtime files to the target tag.
+- Preserves runtime-local files under `data/` while restoring code/docs to the release state.
+- Added regression test coverage to ensure non-runtime tracked files are fully normalized.
+
+## Previous patch summary (5.1.3)
 
 - Fixed launcher token prompt behavior in non-interactive runs: no blocking prompt when stdin/stdout are not TTY.
 - Fixed launcher behavior to skip prompt when `GITHUB_TOKEN`/`GH_TOKEN` is already pre-set in the environment.
@@ -40,6 +46,7 @@ This updates both `version_tally.json` and `setup.cfg`.
 - `5.1.1` **PATCH**: startup token persistence and reuse/change/skip token prompt before boot.
 - `5.1.2` **PATCH**: updater loop fix after update detection (post-stash version normalization + regression test).
 - `5.1.3` **PATCH**: non-interactive token prompt fix + pre-set env token no-prompt behavior.
+- `5.1.4` **PATCH**: full tracked-file normalization after update to prevent partial code/doc rollback.
 
 ## Previous patch summary (5.1.1)
 

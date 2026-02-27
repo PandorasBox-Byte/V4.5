@@ -1,7 +1,7 @@
 # READMECODE (Technical Context + Change History)
 
 This document is a technical handoff/reference for developers and AI assistants.
-It describes what EvoAI V5.1.3 (V5) is, how it starts, model/data flow, and major fixes made in this workspace.
+It describes what EvoAI V5.1.4 (V5) is, how it starts, model/data flow, and major fixes made in this workspace.
 
 ## Versioning rule (project contract)
 
@@ -20,6 +20,7 @@ It describes what EvoAI V5.1.3 (V5) is, how it starts, model/data flow, and majo
 - `5.1.1` **PATCH**: startup GitHub token persistence and reuse/change/skip prompt flow.
 - `5.1.2` **PATCH**: updater loop prevention after stash-pop by re-normalizing release version files.
 - `5.1.3` **PATCH**: launcher token prompt handling fixed for non-interactive mode and pre-set env tokens.
+- `5.1.4` **PATCH**: updater normalization extended to tracked non-runtime files to prevent partial updates.
 
 ## Latest minor change (5.1.0)
 
@@ -45,6 +46,12 @@ It describes what EvoAI V5.1.3 (V5) is, how it starts, model/data flow, and majo
 - Updated `core/launcher.py` to skip token prompting in non-interactive startup paths.
 - Updated `core/launcher.py` to skip prompting when `GITHUB_TOKEN`/`GH_TOKEN` is already set.
 - Added launcher tests for non-interactive startup behavior in `tests/test_launcher.py`.
+
+## Latest patch change (5.1.4)
+
+- Updated `core/auto_updater.py` to normalize tracked non-runtime files after `stash pop` using the target tag.
+- Runtime-local paths under `data/` are excluded from forced restore.
+- Added updater regression test in `tests/test_updater.py` for non-runtime tracked file normalization.
 
 ## 1) System purpose
 

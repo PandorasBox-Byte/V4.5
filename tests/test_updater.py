@@ -136,6 +136,51 @@ class UpdaterTests(unittest.TestCase):
         self.assertTrue(result.needs_restart)
         self.assertIn(["checkout", "v5.1.2", "--", "version_tally.json", "setup.cfg"], calls)
 
+    def test_startup_git_update_normalizes_tracked_nonlocal_files_only(self):
+        calls = []
+
+        def fake_run_git(args, cwd=None, timeout=30):
+            calls.append(list(args))
+            if args[:3] == ["rev-parse", "--abbrev-ref", "HEAD"]:
+                return 0, "main", ""
+            if args[:3] == ["ls-remote", "--tags", "origin"]:
+                return 0, "abc refs/tags/v5.1.3", ""
+            if args[:3] == ["fetch", "--tags", "origin"]:
+                return 0, "", ""
+            if args[:2] == ["status", "--porcelain"]:
+                if ["stash", "pop"] in calls:
+                    return 0, " M README.md\n M core/launcher.py\n M data/memory.json\n", ""
+                return 0, " M README.md\n", ""
+            if args[:2] == ["stash", "push"]:
+                return 0, "Saved working directory", ""
+            if args[:2] == ["reset", "--hard"]:
+                return 0, "", ""
+            if args[:2] == ["stash", "pop"]:
+                return 0, "Applied stash", ""
+            if args[:2] == ["checkout", "v5.1.3"]:
+                return 0, "", ""
+            return 0, "", ""
+
+        versions = iter(["5.1.2", "5.1.2", "5.1.3"])
+
+        def fake_local_version():
+            try:
+                return next(versions)
+            except StopIteration:
+                return "5.1.3"
+
+        with patch("core.auto_updater.shutil.which", return_value="/usr/bin/git"):
+            with patch("core.auto_updater._has_git_repo", return_value=True):
+                with patch("core.auto_updater._run_git", side_effect=fake_run_git):
+                    with patch("core.auto_updater.get_local_version", side_effect=fake_local_version):
+                        result = auto_updater.run_startup_git_update(remote="origin")
+
+        self.assertTrue(result.success)
+        self.assertTrue(result.updated)
+        self.assertTrue(result.needs_restart)
+        self.assertIn(["checkout", "v5.1.3", "--", "README.md", "core/launcher.py"], calls)
+        self.assertNotIn(["checkout", "v5.1.3", "--", "data/memory.json"], calls)
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
