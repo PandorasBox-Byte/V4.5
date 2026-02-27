@@ -15,3 +15,6 @@ data/embeddings.pt
 v311env/
 .venv/
 .venv311/
+
+# runtime transient files
+data/tmp*
