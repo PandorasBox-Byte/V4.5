@@ -539,6 +539,11 @@ class Engine:
             )
 
         for cand in llm_candidates:
+            # Skip path-like candidates that don't exist as local directories.
+            # This prevents slow HuggingFace network retries when auto-discovery
+            # paths (e.g. data/llm_finetuned) are absent.
+            if os.sep in cand and not os.path.isdir(cand):
+                continue
             llm_name = os.path.abspath(cand) if os.path.isdir(cand) else cand
             if not llm_name:
                 continue

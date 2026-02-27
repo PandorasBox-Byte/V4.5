@@ -281,7 +281,7 @@ def main():
         while True:
             try:
                 user_input = input("You: ")
-            except EOFError:
+            except (EOFError, OSError):
                 raise SystemExit
             if user_input is None:
                 raise SystemExit

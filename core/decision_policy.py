@@ -162,7 +162,7 @@ class DecisionPolicy:
             logits["proactive_prompt"] += 0.05
         logits["delegate"] += 0.4
 
-        if self.model is not None and torch is not None:
+        if self.model is not None and torch is not None and self.model_loaded:
             try:
                 with torch.no_grad():
                     x = torch.tensor([features], dtype=torch.float32)
