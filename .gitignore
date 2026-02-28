@@ -37,3 +37,6 @@ data/core_vocab.pt
 *.swo
 *~
 .env.local
+
+# Standalone installer (local-only, distributed separately)
+install.sh

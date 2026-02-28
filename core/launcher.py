@@ -25,7 +25,7 @@ from core.engine_template import Engine
 from core.self_repair import SelfRepair
 from core.auto_updater import run_startup_git_update, get_local_version
 from core import tui
-from core.brain_monitor import launch_brain_monitor_async
+from core.brain_monitor import launch_brain_monitor_async, _get_platform, _is_ssh_session
 
 PIDFILE = os.path.join("data", "engine.pid")
 _UPDATE_GUARD_ENV = "EVOAI_UPDATED_TARGET_VERSION"
@@ -292,13 +292,19 @@ def main():
         return False
 
     def _run_repl_loop(engine_obj):
-        print("Engine started (no TTY) — using REPL.")
+        platform = _get_platform()
+        session_type = "SSH session" if _is_ssh_session() else "local session"
+        print(f"Engine started on {platform} ({session_type}) — using REPL.")
         while True:
             try:
                 user_input = input("You: ")
             except EOFError:
                 raise SystemExit
-            except OSError:
+            except OSError as e:
+                msg = str(e).lower()
+                if "pytest: reading from stdin while output is captured" in msg or os.environ.get("PYTEST_CURRENT_TEST"):
+                    raise SystemExit
+                print(f"[launcher] REPL input unavailable: {e}")
                 raise SystemExit
             if user_input is None:
                 raise SystemExit
@@ -340,8 +346,11 @@ def main():
                 try:
                     global _brain_monitor_process
                     _brain_monitor_process = launch_brain_monitor_async(os.getcwd())
+                    if _brain_monitor_process is None:
+                        # launch_brain_monitor_async already printed reason
+                        pass
                 except Exception as e:
-                    print(f"[launcher] Could not launch brain monitor: {e}")
+                    print(f"[launcher] Brain monitor launch error: {e}")
 
             # Construct engine in a background thread while the TUI shows progress.
             class EngineLoader:
@@ -477,6 +486,7 @@ def main():
                 if engine is None:
                     raise RuntimeError("engine failed to initialize")
                 _run_repl_loop(engine)
+                break
         except (KeyboardInterrupt, SystemExit):
             break
         except Exception as e:

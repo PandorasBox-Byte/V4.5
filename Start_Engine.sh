@@ -63,7 +63,10 @@ export EVOAI_RESPONDER="${EVOAI_RESPONDER:-smart}"
 export EVOAI_USE_THESAURUS="${EVOAI_USE_THESAURUS:-0}"
 export EVOAI_STARTUP_STDOUT_LOGS="${EVOAI_STARTUP_STDOUT_LOGS:-0}"
 export EVOAI_BACKEND_PROVIDER="${EVOAI_BACKEND_PROVIDER:-github}"
-export EVOAI_FORCE_TUI="${EVOAI_FORCE_TUI:-1}"
+# Ensure TUI launches by default, even if parent shell exported a different value.
+export EVOAI_FORCE_TUI="1"
+# Keep brain monitor enabled by default.
+export EVOAI_ENABLE_BRAIN_MONITOR="${EVOAI_ENABLE_BRAIN_MONITOR:-1}"
 
 echo "Starting EvoAI launcher (TUI if available). Press q or Ctrl-C to quit."
 

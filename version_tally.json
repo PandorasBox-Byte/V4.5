@@ -1,7 +1,7 @@
 {
-  "current_version": "7.3.0",
+  "current_version": "7.4.0",
   "major": 7,
-  "minor": 3,
+  "minor": 4,
   "patch": 0,
   "rules": {
     "major": "Major structural changes (non-engine architecture shifts)",
@@ -9,6 +9,13 @@
     "patch": "Bug fixes"
   },
   "history": [
+    {
+      "date": "2026-02-28",
+      "change": "minor",
+      "from": "7.3.0",
+      "to": "7.4.0",
+      "reason": "Multi-platform support: auto-detect macOS/Linux, SSH session detection, brain monitor UI for both platforms"
+    },
     {
       "date": "2026-02-27",
       "change": "major",

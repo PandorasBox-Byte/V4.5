@@ -10,9 +10,90 @@ import sys
 import time
 import curses
 import threading
+import shutil
 from collections import defaultdict, deque
 from pathlib import Path
-from typing import Dict, Set, Optional
+from typing import Dict, Set, Optional, Tuple
+
+
+# Platform detection helpers
+def _get_platform() -> str:
+    """Detect the operating system platform.
+    
+    Returns:
+        "macos" for macOS/Darwin, "linux" for Linux, "windows" for Windows, "unknown" otherwise
+    """
+    platform = sys.platform.lower()
+    if platform == "darwin":
+        return "macos"
+    elif platform.startswith("linux"):
+        return "linux"
+    elif platform.startswith("win"):
+        return "windows"
+    else:
+        return "unknown"
+
+
+def _is_ssh_session() -> bool:
+    """Check if we're running in an SSH session.
+    
+    Returns:
+        True if SSH environment variables are detected
+    """
+    return bool(
+        os.environ.get("SSH_CONNECTION") or
+        os.environ.get("SSH_CLIENT") or
+        os.environ.get("SSH_TTY")
+    )
+
+
+def _can_launch_monitor() -> Tuple[bool, str]:
+    """Check if brain monitor UI can be launched.
+    
+    Returns:
+        (can_launch, reason) - can_launch is True if launch is possible,
+        reason explains why if False
+    """
+    platform = _get_platform()
+    
+    # SSH sessions can't spawn new terminal windows
+    if _is_ssh_session():
+        return False, f"SSH session detected (platform: {platform})"
+    
+    # Check platform support
+    if platform == "macos":
+        return True, "macOS local session"
+    elif platform == "linux":
+        # Check if we have a DISPLAY for X11 (optional but helpful)
+        if not os.environ.get("DISPLAY"):
+            return False, "Linux without DISPLAY (headless or no X11)"
+        return True, "Linux with display"
+    elif platform == "windows":
+        return False, "Windows not supported for brain monitor UI"
+    else:
+        return False, f"Unsupported platform: {platform}"
+
+
+def _find_linux_terminal() -> Optional[str]:
+    """Find an available terminal emulator on Linux.
+    
+    Returns:
+        Terminal command name if found, None otherwise
+    """
+    # Try terminals in priority order
+    terminals = [
+        "gnome-terminal",  # Common on Ubuntu/GNOME
+        "xterm",           # Lightweight, usually available
+        "konsole",         # KDE
+        "xfce4-terminal",  # XFCE
+        "mate-terminal",   # MATE
+    ]
+    
+    for term in terminals:
+        if shutil.which(term):
+            return term
+    
+    return None
 
 
 class BrainMonitor:
@@ -277,19 +358,49 @@ def start_monitor_window(workspace_root: Optional[str] = None, use_curses: bool 
     return monitor
 
 
-def launch_brain_monitor_async(workspace_root: Optional[str] = None):
-    """Launch brain monitor in separate Terminal window (macOS).
+class MonitorProcess:
+    """Handle for brain monitor process, platform-agnostic cleanup."""
     
+    def __init__(self, script_path=None):
+        self.script_path = script_path
+        self.pid = None
+        
+    def terminate(self):
+        """Kill any remaining brain_monitor processes"""
+        try:
+            import subprocess
+            subprocess.run(
+                ["pkill", "-f", "core.brain_monitor"],
+                timeout=2
+            )
+        except Exception:
+            pass
+            
+    def kill(self):
+        """Force kill brain_monitor processes"""
+        try:
+            import subprocess
+            subprocess.run(
+                ["pkill", "-9", "-f", "core.brain_monitor"],
+                timeout=2
+            )
+        except Exception:
+            pass
+            
+    def wait(self, timeout=None):
+        """Wait for monitor to exit"""
+        pass
+
+
+def _find_python_exe(workspace: str) -> Optional[str]:
+    """Find the correct Python interpreter in the venv.
+    
+    Args:
+        workspace: Workspace root directory
+        
     Returns:
-        subprocess.Popen object for the Terminal.app process (for cleanup), or None if launch failed
+        Path to python executable or None if not found
     """
-    import subprocess
-    import tempfile
-    
-    workspace = workspace_root or os.getcwd()
-    
-    # Find the correct Python interpreter in the venv
-    # Try .venv311 first, fall back to system python3
     python_paths = [
         os.path.join(workspace, ".venv311", "bin", "python3"),
         os.path.join(workspace, ".venv", "bin", "python3"),
@@ -297,15 +408,25 @@ def launch_brain_monitor_async(workspace_root: Optional[str] = None):
         "/usr/bin/python3"
     ]
     
-    python_exe = None
     for path in python_paths:
         if os.path.exists(path):
-            python_exe = path
-            break
+            return path
     
-    if not python_exe:
-        print("Error: Could not find Python executable", file=sys.stderr)
-        return None
+    return None
+
+
+def _launch_monitor_macos(workspace: str, python_exe: str) -> Optional[MonitorProcess]:
+    """Launch brain monitor on macOS using AppleScript and Terminal.app.
+    
+    Args:
+        workspace: Workspace root directory
+        python_exe: Path to Python executable
+        
+    Returns:
+        MonitorProcess handle or None if launch failed
+    """
+    import subprocess
+    import tempfile
     
     # Create a temporary shell script to run the monitor
     # When the monitor is killed (e.g., by Ctrl+C in main window),
@@ -333,43 +454,11 @@ tell application "Terminal"
 end tell
 '''
         
-        # Use subprocess.Popen to capture the process for later cleanup
         result = subprocess.run(
             ["osascript", "-e", applescript],
             capture_output=True,
             timeout=5
         )
-        
-        # Return a dummy process-like object since we can't directly track the Terminal window
-        # Instead, we'll store metadata about the monitor for cleanup
-        class MonitorProcess:
-            def __init__(self, script_path):
-                self.script_path = script_path
-                self.pid = None
-                
-            def terminate(self):
-                """Kill any remaining brain_monitor processes"""
-                try:
-                    subprocess.run(
-                        ["pkill", "-f", "core.brain_monitor"],
-                        timeout=2
-                    )
-                except Exception:
-                    pass
-                    
-            def kill(self):
-                """Force kill brain_monitor processes"""
-                try:
-                    subprocess.run(
-                        ["pkill", "-9", "-f", "core.brain_monitor"],
-                        timeout=2
-                    )
-                except Exception:
-                    pass
-                    
-            def wait(self, timeout=None):
-                """Wait for monitor to exit"""
-                pass
         
         if result.returncode != 0 and result.stderr:
             stderr = result.stderr.decode() if result.stderr else ""
@@ -394,7 +483,101 @@ end tell
         pass  # AppleScript timed out, but window should be open
         return None
     except Exception as e:
-        print(f"Could not launch brain monitor: {e}", file=sys.stderr)
+        print(f"Could not launch brain monitor on macOS: {e}", file=sys.stderr)
+        return None
+
+
+def _launch_monitor_linux(workspace: str, python_exe: str) -> Optional[MonitorProcess]:
+    """Launch brain monitor on Linux using detected terminal emulator.
+    
+    Args:
+        workspace: Workspace root directory
+        python_exe: Path to Python executable
+        
+    Returns:
+        MonitorProcess handle or None if launch failed
+    """
+    import subprocess
+    
+    terminal = _find_linux_terminal()
+    if not terminal:
+        print("Error: No suitable terminal emulator found (tried gnome-terminal, xterm, konsole, xfce4-terminal, mate-terminal)", file=sys.stderr)
+        return None
+    
+    try:
+        # Build command based on terminal type
+        if terminal == "gnome-terminal":
+            # gnome-terminal uses -- to separate terminal options from command
+            cmd = [
+                terminal,
+                "--",
+                "bash", "-c",
+                f'cd "{workspace}" && "{python_exe}" -m core.brain_monitor; read -p "Press enter to close..."'
+            ]
+        elif terminal == "konsole":
+            # konsole uses -e for command execution
+            cmd = [
+                terminal,
+                "-e",
+                "bash", "-c",
+                f'cd "{workspace}" && "{python_exe}" -m core.brain_monitor; read -p "Press enter to close..."'
+            ]
+        else:
+            # xterm and most others use -e
+            cmd = [
+                terminal,
+                "-e",
+                "bash", "-c",
+                f'cd "{workspace}" && "{python_exe}" -m core.brain_monitor; read -p "Press enter to close..."'
+            ]
+        
+        # Launch the terminal in the background
+        process = subprocess.Popen(
+            cmd,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            start_new_session=True
+        )
+        
+        return MonitorProcess()
+        
+    except Exception as e:
+        print(f"Could not launch brain monitor on Linux: {e}", file=sys.stderr)
+        return None
+
+
+def launch_brain_monitor_async(workspace_root: Optional[str] = None):
+    """Launch brain monitor in separate terminal window (macOS/Linux).
+    
+    Automatically detects platform and uses appropriate terminal launcher.
+    Skips launch gracefully if running over SSH or on unsupported platform.
+    
+    Returns:
+        MonitorProcess handle for cleanup, or None if launch skipped/failed
+    """
+    workspace = workspace_root or os.getcwd()
+    
+    # Check if we can launch the monitor UI
+    can_launch, reason = _can_launch_monitor()
+    if not can_launch:
+        print(f"Brain monitor UI skipped: {reason}", file=sys.stderr)
+        print(f"(Activity logging to {os.path.join(workspace, 'data', 'brain_activity.log')} continues)", file=sys.stderr)
+        return None
+    
+    # Find Python executable
+    python_exe = _find_python_exe(workspace)
+    if not python_exe:
+        print("Error: Could not find Python executable for brain monitor", file=sys.stderr)
+        return None
+    
+    # Launch based on platform
+    platform = _get_platform()
+    if platform == "macos":
+        return _launch_monitor_macos(workspace, python_exe)
+    elif platform == "linux":
+        return _launch_monitor_linux(workspace, python_exe)
+    else:
+        print(f"Brain monitor not supported on platform: {platform}", file=sys.stderr)
         return None
 
 
