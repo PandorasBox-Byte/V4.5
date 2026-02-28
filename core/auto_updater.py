@@ -9,6 +9,7 @@ user explicitly agrees.
 This module is used by ``core.engine_template.Engine`` when
 ``EVOAI_AUTO_UPDATE_URL`` is set.
 """
+from __future__ import annotations
 
 import json
 import os

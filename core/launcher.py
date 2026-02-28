@@ -25,9 +25,11 @@ from core.engine_template import Engine
 from core.self_repair import SelfRepair
 from core.auto_updater import run_startup_git_update, get_local_version
 from core import tui
+from core.brain_monitor import launch_brain_monitor_async
 
 PIDFILE = os.path.join("data", "engine.pid")
 _UPDATE_GUARD_ENV = "EVOAI_UPDATED_TARGET_VERSION"
+_brain_monitor_process = None  # Track brain monitor subprocess
 
 
 def _semver_tuple(value: str) -> tuple[int, int, int] | None:
@@ -55,7 +57,20 @@ def remove_pidfile():
 
 
 def handle_exit(sig, frame):
+    global _brain_monitor_process
     print("\nShutting down EvoAI (launcher cleanup)...")
+    
+    # Kill brain monitor if it's running
+    if _brain_monitor_process is not None:
+        try:
+            _brain_monitor_process.terminate()
+            _brain_monitor_process.wait(timeout=2)
+        except Exception:
+            try:
+                _brain_monitor_process.kill()
+            except Exception:
+                pass
+    
     remove_pidfile()
     sys.exit(0)
 
@@ -318,6 +333,14 @@ def main():
             _maybe_prompt_for_api_key()
             _maybe_run_startup_training()
 
+            # Launch brain monitor in separate terminal window (if enabled)
+            if os.environ.get("EVOAI_ENABLE_BRAIN_MONITOR", "1").lower() in ("1", "true", "yes"):
+                try:
+                    global _brain_monitor_process
+                    _brain_monitor_process = launch_brain_monitor_async(os.getcwd())
+                except Exception as e:
+                    print(f"[launcher] Could not launch brain monitor: {e}")
+
             # Construct engine in a background thread while the TUI shows progress.
             class EngineLoader:
                 def __init__(self):
@@ -465,6 +488,17 @@ def main():
                 except Exception:
                     pass
 
+    # Cleanup brain monitor on exit
+    if _brain_monitor_process is not None:
+        try:
+            _brain_monitor_process.terminate()
+            _brain_monitor_process.wait(timeout=2)
+        except Exception:
+            try:
+                _brain_monitor_process.kill()
+            except Exception:
+                pass
+    
     remove_pidfile()
 
 

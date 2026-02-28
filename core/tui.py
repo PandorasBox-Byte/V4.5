@@ -53,7 +53,38 @@ def _read_version_label() -> str:
     return "unknown"
 
 
+def _read_loader_generation_label() -> str:
+    repo_root = Path(__file__).resolve().parent.parent
+    tally_path = repo_root / "version_tally.json"
+    setup_cfg_path = repo_root / "setup.cfg"
+
+    try:
+        if tally_path.exists():
+            data = json.loads(tally_path.read_text(encoding="utf-8"))
+            current = str(data.get("current_version", "")).strip()
+            if current:
+                major = current.split(".", 1)[0]
+                return f"Evolution V{major}"
+    except Exception:
+        pass
+
+    try:
+        if setup_cfg_path.exists():
+            for raw in setup_cfg_path.read_text(encoding="utf-8").splitlines():
+                line = raw.strip()
+                if line.startswith("version") and "=" in line:
+                    current = line.split("=", 1)[1].strip()
+                    if current:
+                        major = current.split(".", 1)[0]
+                        return f"Evolution V{major}"
+    except Exception:
+        pass
+
+    return "Evolution"
+
+
 VERSION_LABEL = _read_version_label()
+LOADER_GENERATION_LABEL = _read_loader_generation_label()
 
 
 def _handle_tui_command(text: str, history: List[str], engine) -> bool:
@@ -197,7 +228,7 @@ def run(engine_or_loader, stdscr=None):
             r" E        V V   O   O",
             r" EEEEE     V     OOO ",
             r"                       ",  # blank line for spacing
-            r"      Evolution 6      ",
+            f"      {LOADER_GENERATION_LABEL}      ",
         ]
 
         stdscr_inner.erase()

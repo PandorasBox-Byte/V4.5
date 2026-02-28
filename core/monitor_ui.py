@@ -15,6 +15,7 @@ If ``--start-engine`` is supplied, the engine is created in-process; otherwise
 ``--api`` to have the monitor poll a separately started engine for additional
 reports.
 """
+from __future__ import annotations
 
 import argparse
 import curses

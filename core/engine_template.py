@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import os
 import atexit
 import signal
@@ -58,6 +60,7 @@ from core.safety_gate import SafetyGate
 from core.autonomy_tools import CodeIntelToolkit, ResearchToolkit
 from core.tested_apply import TestedApplyOrchestrator
 from core.code_assistant import CodeAssistant
+from core.brain_monitor import BrainMonitor, install_trace_hook
 
 
 def _path_candidates(raw: str | None) -> List[str]:
@@ -420,6 +423,16 @@ class Engine:
         self.research_toolkit = ResearchToolkit()
         self.tested_apply_orchestrator = TestedApplyOrchestrator(workspace_root=os.getcwd())
         self.code_assistant = CodeAssistant(workspace_root=os.getcwd())
+        
+        # Initialize brain monitor (tracks file execution in real-time)
+        self.brain_monitor = None
+        if os.environ.get("EVOAI_ENABLE_BRAIN_MONITOR", "1").lower() in ("1", "true", "yes"):
+            try:
+                self.brain_monitor = BrainMonitor(workspace_root=os.getcwd())
+                install_trace_hook(self.brain_monitor)
+            except Exception:
+                pass
+        
         self.autonomy_paused = os.environ.get("EVOAI_AUTONOMY_PAUSED", "0").lower() in ("1", "true", "yes")
         self.autonomy_budget_max = max(0, int(os.environ.get("EVOAI_AUTONOMY_BUDGET_MAX", "25")))
         self.autonomy_budget_remaining = max(
@@ -682,6 +695,14 @@ class Engine:
         _report(1.0, "ready")
         self._set_status("ready", "yes")
 
+        # Clear brain activity log file for fresh start
+        try:
+            activity_file = os.path.join(os.getcwd(), "data", "brain_activity.log")
+            if os.path.exists(activity_file):
+                os.remove(activity_file)
+        except Exception:
+            pass
+
         # optionally start REST API
         if os.environ.get("EVOAI_ENABLE_API", "").lower() in ("1", "true", "yes"):
             try:
@@ -796,7 +817,19 @@ class Engine:
         with open(meta_path, "w", encoding="utf-8") as f:
             json.dump(meta, f, ensure_ascii=False, indent=2)
 
+    def _log_brain_activity(self, filename: str):
+        """Log brain activity to file for IPC with brain monitor."""
+        try:
+            activity_file = os.path.join(os.getcwd(), "data", "brain_activity.log")
+            os.makedirs(os.path.dirname(activity_file), exist_ok=True)
+            with open(activity_file, 'a') as f:
+                f.write(f"{time.time()}|{filename}\n")
+                f.flush()  # Force write to disk immediately
+        except Exception:
+            pass
+
     def _try_external_conversation_reply(self, text: str) -> str | None:
+        self._log_brain_activity("github_backend.py")
         if os.environ.get("EVOAI_COPILOT_CHAT", "1").lower() not in ("1", "true", "yes"):
             return None
         if getattr(self, "external_backend", None) is None:
@@ -1089,6 +1122,9 @@ class Engine:
 
         # (moved out into __init__)
     def respond(self, text):
+        # Log brain activity
+        self._log_brain_activity("engine_template.py")
+        
         # delegate to the configured responder implementation; this keeps the
         # logic centralized and makes the behaviour configurable via
         # ``EVOAI_RESPONDER``.  The responders themselves handle empty input
@@ -1096,9 +1132,71 @@ class Engine:
         if not text or not str(text).strip():
             return "Please enter something."
 
+        # Handle special commands
+        text_lower = str(text).strip().lower()
+        
+        # Backend control command
+        if text_lower == "disable backend":
+            if self.external_backend is None:
+                return "Backend is already disabled. Using local processing only."
+            else:
+                self.external_backend = None
+                self._set_status("backend_active", "false")
+                return "✓ Backend disabled. Now using local (non-API) processing. Backend can be re-enabled by restarting."
+        
+        if text_lower == "enable backend":
+            if self.external_backend is not None:
+                return "Backend is already enabled."
+            else:
+                # Re-enable backend
+                try:
+                    from core.github_backend import GitHubBackend
+                    if os.environ.get("GITHUB_TOKEN") or os.environ.get("GH_TOKEN"):
+                        self.external_backend = GitHubBackend()
+                        self._set_status("backend_active", "true")
+                        return "✓ Backend re-enabled. Using GitHub Models API."
+                    else:
+                        return "Cannot enable backend: No GitHub token available. Set GITHUB_TOKEN environment variable."
+                except Exception as e:
+                    return f"Could not re-enable backend: {e}"
+        
+        if text_lower == "backend status":
+            status = "enabled (GitHub Models API)" if self.external_backend else "disabled (local processing)"
+            return f"Backend status: {status}"
+
         autonomous = self.try_handle_autonomous_request(str(text), progress_cb=None)
         if autonomous is not None:
             return autonomous
+
+        # When backend is disabled, use local responder for normal conversation
+        if self.external_backend is None:
+            self._log_brain_activity("memory.py")
+            reply = self.responder.respond(str(text), self)
+            self._turns_since_proactive += 1
+            
+            # maybe ask for a clarification if the user input seemed vague
+            try:
+                from core import language_utils
+                self._log_brain_activity("language_utils.py")
+
+                clar, topic = language_utils.clarify_if_ambiguous(text)
+                if clar and topic and topic not in self.clarifications_asked:
+                    self.clarifications_asked.add(topic)
+                    reply = clar + " " + reply
+            except Exception:
+                pass
+
+            # optionally enhance vocabulary of the reply
+            if os.environ.get("EVOAI_USE_THESAURUS", "1").lower() in ("1", "true", "yes"):
+                try:
+                    from core import language_utils
+                    self._log_brain_activity("language_utils.py")
+
+                    reply = language_utils.enhance_text(reply)
+                except Exception:
+                    pass
+            
+            return reply
 
         ext_allowed, ext_reason = self.safety_gate.evaluate("external_backend", str(text), self)
         external_reply = self._try_external_conversation_reply(str(text)) if ext_allowed else None
@@ -1137,6 +1235,7 @@ class Engine:
             "reason": "default",
         }
         try:
+            self._log_brain_activity("decision_policy.py")
             decision = self.decision_policy.decide(text, self)
         except Exception:
             decision = {
@@ -1175,8 +1274,10 @@ class Engine:
         self._audit_event("allow", str(action), "ok", text)
 
         if action == "simple_reply":
+            self._log_brain_activity("memory.py")
             reply = SimpleResponder().respond(text, self)
         elif action == "llm_generate" and self.llm_model and self.llm_tokenizer:
+            self._log_brain_activity("trainer.py")
             reply = SmartResponder().generate_with_model(
                 SmartResponder().build_prompt(text, self),
                 self,
@@ -1197,6 +1298,7 @@ class Engine:
             else:
                 self._turns_since_proactive += 1
         elif action == "clarify_first":
+            self._log_brain_activity("language_utils.py")
             try:
                 from core import language_utils
 
@@ -1222,17 +1324,20 @@ class Engine:
             )
             self.record_interaction(text, reply)
         elif action == "code_intel_query":
+            self._log_brain_activity("plugin_manager.py")
             report = self.code_intel_toolkit.analyze(text)
             reply = str(report.get("summary", "Code intel query completed."))
             self._set_status("code_intel_last_matches", str(len(report.get("matches", []))))
             self.record_interaction(text, reply)
         elif action == "research_query":
+            self._log_brain_activity("network_scanner.py")
             result = self.research_toolkit.research(text, self)
             reply = str(result.get("summary", "Research query completed."))
             self._set_status("research_last_plugin_hits", str(len(result.get("plugin_findings", []))))
             self._set_status("research_last_web_results", str(len(result.get("web_results", []))))
             self.record_interaction(text, reply)
         elif action == "tested_apply":
+            self._log_brain_activity("self_repair.py")
             outcome = self.tested_apply_orchestrator.run(text)
             reply = str(outcome.get("summary", "Tested apply finished."))
             self._set_status("tested_apply_last_ok", str(bool(outcome.get("ok", False))).lower())
