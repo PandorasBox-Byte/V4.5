@@ -99,13 +99,16 @@ def get_local_version() -> str:
     root = _repo_root()
     tally = root / "version_tally.json"
     setup_cfg = root / "setup.cfg"
+    
+    tally_version = None
+    setup_version = None
 
     try:
         if tally.exists():
             data = json.loads(tally.read_text(encoding="utf-8"))
             current = str(data.get("current_version", "")).strip()
             if current:
-                return current
+                tally_version = current
     except Exception:
         pass
 
@@ -116,10 +119,23 @@ def get_local_version() -> str:
                 if line.startswith("version") and "=" in line:
                     current = line.split("=", 1)[1].strip()
                     if current:
-                        return current
+                        setup_version = current
+                        break
     except Exception:
         pass
 
+    # If both files exist and have different versions, use the lower version
+    # (more conservative) to ensure updates happen when files are out of sync
+    if tally_version and setup_version and tally_version != setup_version:
+        tally_tuple = _semver_tuple_from_version(tally_version)
+        setup_tuple = _semver_tuple_from_version(setup_version)
+        if tally_tuple and setup_tuple:
+            return setup_version if setup_tuple < tally_tuple else tally_version
+    
+    if tally_version:
+        return tally_version
+    if setup_version:
+        return setup_version
     return "0.0.0"
 
 

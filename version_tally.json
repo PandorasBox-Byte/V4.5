@@ -1,8 +1,8 @@
 {
-  "current_version": "7.0.0",
+  "current_version": "7.0.1",
   "major": 7,
   "minor": 0,
-  "patch": 0,
+  "patch": 1,
   "rules": {
     "major": "Major structural changes (non-engine architecture shifts)",
     "minor": "Feature-level and other minor changes",
@@ -71,6 +71,13 @@
       "from": "6.0.0",
       "to": "7.0.0",
       "reason": "Major V7 release: autonomous governance, safety gates, tested-apply orchestration, runtime policy closed-loop, and governance APIs"
+    },
+    {
+      "date": "2026-02-28",
+      "change": "patch",
+      "from": "7.0.0",
+      "to": "7.0.1",
+      "reason": "Bug fix: updater now detects version file inconsistencies and triggers update when setup.cfg and version_tally.json disagree"
     }
   ]
 }
