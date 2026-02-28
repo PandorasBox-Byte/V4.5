@@ -665,6 +665,7 @@ class Engine:
 
         # Optional external backend (GitHub Models by default).
         self.external_backend = None
+        self.backend_manually_disabled = False
         backend_provider = os.environ.get("EVOAI_BACKEND_PROVIDER", "github").strip().lower()
         self._set_status("backend_provider", backend_provider)
         self._set_status("backend_active", "false")
@@ -887,6 +888,58 @@ class Engine:
         except Exception:
             pass
         return fallback
+
+    def _action_matches_user_intent(self, action: str, text: str) -> bool:
+        lowered = (text or "").strip().lower()
+        if not lowered:
+            return False
+
+        if action in ("delegate", "simple_reply", "llm_generate", "clarify_first"):
+            return True
+
+        intent_tokens = {
+            "proactive_prompt": ("proactive", "next step", "what next", "suggest next"),
+            "autonomy_plan": ("plan", "autonomy", "roadmap", "strategy"),
+            "safety_check": ("safety", "governance", "permissions", "policy", "status"),
+            "code_intel_query": (
+                "code",
+                "function",
+                "class",
+                "module",
+                "file",
+                "path",
+                "analyze",
+                "refactor",
+            ),
+            "research_query": ("research", "search", "look up", "find", "http://", "https://"),
+            "code_assist": (
+                "code",
+                "function",
+                "class",
+                "refactor",
+                "implement",
+                "bug",
+                "fix",
+                "patch",
+                "python",
+                "file",
+            ),
+            "tested_apply": (
+                "rewrite",
+                "rewrite code",
+                "modify",
+                "modify code",
+                "apply",
+                "patch",
+                "update file",
+                "fix code",
+            ),
+        }
+
+        tokens = intent_tokens.get(action)
+        if not tokens:
+            return True
+        return any(token in lowered for token in tokens)
 
     def run_self_test(self, progress_cb=None) -> str:
         from core.self_repair import SelfRepair
@@ -1137,6 +1190,7 @@ class Engine:
         
         # Backend control command
         if text_lower == "disable backend":
+            self.backend_manually_disabled = True
             if self.external_backend is None:
                 return "Backend is already disabled. Using local processing only."
             else:
@@ -1145,7 +1199,7 @@ class Engine:
                 return "✓ Backend disabled. Now using local (non-API) processing. Backend can be re-enabled by restarting."
         
         if text_lower == "enable backend":
-            if self.external_backend is not None:
+            if self.external_backend is not None and not self.backend_manually_disabled:
                 return "Backend is already enabled."
             else:
                 # Re-enable backend
@@ -1153,6 +1207,7 @@ class Engine:
                     from core.github_backend import GitHubBackend
                     if os.environ.get("GITHUB_TOKEN") or os.environ.get("GH_TOKEN"):
                         self.external_backend = GitHubBackend()
+                        self.backend_manually_disabled = False
                         self._set_status("backend_active", "true")
                         return "✓ Backend re-enabled. Using GitHub Models API."
                     else:
@@ -1168,8 +1223,9 @@ class Engine:
         if autonomous is not None:
             return autonomous
 
-        # When backend is disabled, use local responder for normal conversation
-        if self.external_backend is None:
+        # When backend is explicitly disabled by command, use local responder
+        # for normal conversation and bypass decision-policy routing.
+        if self.backend_manually_disabled:
             self._log_brain_activity("memory.py")
             reply = self.responder.respond(str(text), self)
             self._turns_since_proactive += 1
@@ -1246,6 +1302,9 @@ class Engine:
             }
 
         action = decision.get("action", "delegate")
+        if not self._action_matches_user_intent(str(action), str(text)):
+            decision["reason"] = f"intent_fallback:{decision.get('reason', 'unknown')}"
+            action = "delegate"
         self._set_status("decision_last_action", str(action))
         self._set_status("decision_last_latency_ms", f"{decision.get('elapsed_ms', 0.0):.2f}")
         self._set_status("decision_last_reason", str(decision.get("reason", "unknown")))
@@ -1275,7 +1334,7 @@ class Engine:
 
         if action == "simple_reply":
             self._log_brain_activity("memory.py")
-            reply = SimpleResponder().respond(text, self)
+            reply = self.responder.respond(text, self)
         elif action == "llm_generate" and self.llm_model and self.llm_tokenizer:
             self._log_brain_activity("trainer.py")
             reply = SmartResponder().generate_with_model(

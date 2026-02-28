@@ -298,6 +298,8 @@ def main():
                 user_input = input("You: ")
             except EOFError:
                 raise SystemExit
+            except OSError:
+                raise SystemExit
             if user_input is None:
                 raise SystemExit
             if not user_input.strip():
