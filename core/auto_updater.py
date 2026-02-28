@@ -371,6 +371,14 @@ def run_startup_git_update(
                     _progress(1.0, f"Update failed: {result.failed_reason}")
                     return result
 
+            _progress(0.95, "Verifying and repairing file completeness...")
+            ok, reason = repair_to_remote_state(target_tag, root=root, progress_cb=_progress)
+            if not ok:
+                result.success = False
+                result.failed_reason = f"File repair failed: {reason}"
+                _progress(1.0, f"Update failed: {result.failed_reason}")
+                return result
+
         result.updated = True
         result.needs_restart = True
         _progress(1.0, f"Update successful: {target_tag}")
@@ -490,6 +498,158 @@ def run_update_flow(manifest_url: str) -> bool:
         apply_update(tmp_path, base_dir=orig_cwd)
         print("Update applied successfully.")
         return True
+
+
+def get_remote_file_list(tag: str, root: Path | None = None) -> set[str]:
+    """Fetch the complete list of tracked files in the remote tag.
+    
+    Uses ``git ls-tree -r`` to recursively enumerate all files tracked at that tag.
+    Returns a set of relative paths (using forward slashes).
+    """
+    if root is None:
+        root = _repo_root()
+    
+    code, out, _err = _run_git(["ls-tree", "-r", "--name-only", tag], cwd=root, timeout=60)
+    if code != 0:
+        return set()
+    
+    files = set()
+    for line in out.splitlines():
+        path = line.strip()
+        if path:
+            files.add(path.replace("\\", "/"))
+    return files
+
+
+def verify_complete_state(target_tag: str, root: Path | None = None) -> dict:
+    """Verify that the local working tree matches the remote tag exactly.
+    
+    Compares:
+    - Local tracked files vs remote tracked files
+    - File contents (by comparing hashes)
+    
+    Returns a dict with keys:
+    - ``ok``: bool - True if local matches remote perfectly
+    - ``missing_files``: list - files in remote but not local
+    - ``extra_files``: list - files in local but not in remote
+    - ``divergent_files``: list - files that exist in both but have different content
+    - ``error``: str - error message if verification failed
+    """
+    if root is None:
+        root = _repo_root()
+    
+    result = {
+        "ok": False,
+        "missing_files": [],
+        "extra_files": [],
+        "divergent_files": [],
+        "error": None,
+    }
+    
+    remote_files = get_remote_file_list(target_tag, root)
+    if not remote_files:
+        result["error"] = "Failed to fetch remote file list"
+        return result
+    
+    local_files = set()
+    for local_path in root.rglob("*"):
+        if local_path.is_file() and not str(local_path.relative_to(root)).startswith(".git"):
+            rel = local_path.relative_to(root)
+            local_files.add(str(rel).replace("\\", "/"))
+    
+    remote_set = set(remote_files)
+    local_set = set(local_files)
+    
+    missing = list(remote_set - local_set)
+    extra = list(local_set - remote_set)
+    result["missing_files"] = sorted(missing)
+    result["extra_files"] = sorted(extra)
+    
+    divergent = []
+    for fpath in remote_set & local_set:
+        local_file = root / fpath
+        
+        code, remote_hash, _ = _run_git(["hash-object", f"{target_tag}:{fpath}"], cwd=root, timeout=60)
+        if code != 0:
+            continue
+        
+        try:
+            local_hash = subprocess.run(
+                ["git", "hash-object", str(local_file)],
+                cwd=str(root),
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                timeout=30,
+            ).stdout.strip()
+        except Exception:
+            continue
+        
+        if remote_hash.strip() != local_hash:
+            divergent.append(fpath)
+    
+    result["divergent_files"] = sorted(divergent)
+    result["ok"] = not missing and not divergent
+    return result
+
+
+def repair_to_remote_state(
+    target_tag: str,
+    root: Path | None = None,
+    progress_cb: Callable[[float, str], None] | None = None,
+) -> tuple[bool, str]:
+    """Repair local working tree to match remote tag state exactly.
+    
+    Fetches missing files and re-syncs divergent files from the remote tag.
+    Preserves extra local files (runtime data, etc).
+    
+    Returns (success: bool, reason: str)
+    """
+    if root is None:
+        root = _repo_root()
+    
+    def _progress(frac: float, msg: str) -> None:
+        if progress_cb is None:
+            return
+        try:
+            progress_cb(float(frac), str(msg))
+        except Exception:
+            pass
+    
+    _progress(0.10, "Verifying local state...")
+    verification = verify_complete_state(target_tag, root)
+    
+    if verification["ok"]:
+        _progress(1.0, "Local state matches remote")
+        return True, "ok"
+    
+    missing = verification.get("missing_files", [])
+    divergent = verification.get("divergent_files", [])
+    
+    to_repair = list(set(missing) | set(divergent))
+    if not to_repair:
+        _progress(1.0, "No files to repair")
+        return True, "ok"
+    
+    _progress(0.20, f"Repairing {len(to_repair)} file(s) from {target_tag}...")
+    
+    try:
+        code, _out, err = _run_git(["checkout", target_tag, "--", *to_repair], cwd=root, timeout=120)
+        if code != 0:
+            return False, err or "Failed to checkout files from remote tag"
+        
+        _progress(0.90, "Verifying repair...")
+        verification_after = verify_complete_state(target_tag, root)
+        if not verification_after["ok"]:
+            remaining = len(verification_after.get("missing_files", [])) + len(
+                verification_after.get("divergent_files", [])
+            )
+            return False, f"Repair incomplete: {remaining} file(s) still divergent"
+        
+        _progress(1.0, f"Repair successful: {len(to_repair)} file(s) restored")
+        return True, "ok"
+    except Exception as exc:
+        return False, str(exc)
 
 
 def safe_run_update(manifest_url: str) -> None:

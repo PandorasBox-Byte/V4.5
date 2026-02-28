@@ -1,8 +1,8 @@
 {
-  "current_version": "7.0.1",
+  "current_version": "7.0.2",
   "major": 7,
   "minor": 0,
-  "patch": 1,
+  "patch": 2,
   "rules": {
     "major": "Major structural changes (non-engine architecture shifts)",
     "minor": "Feature-level and other minor changes",
@@ -78,6 +78,13 @@
       "from": "7.0.0",
       "to": "7.0.1",
       "reason": "Bug fix: updater now detects version file inconsistencies and triggers update when setup.cfg and version_tally.json disagree"
+    },
+    {
+      "date": "2026-02-28",
+      "change": "patch",
+      "from": "7.0.1",
+      "to": "7.0.2",
+      "reason": "Enhancement: updater now verifies and auto-repairs missing/divergent files from remote tag (concrete, complete sync)"
     }
   ]
 }
