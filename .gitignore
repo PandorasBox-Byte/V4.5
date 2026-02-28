@@ -26,6 +26,27 @@ data/tmp*
 data/engine.pid
 *.log
 
+# Autonomous learning runtime data (v7.5.0+)
+data/*_log.jsonl
+data/*_history.jsonl
+data/*_cache.json
+data/*_patterns.json
+data/*_queue.json
+data/knowledge_graph.json
+data/knowledge_gaps.json
+data/performance_metrics.jsonl
+data/learning_*.json
+data/modification_log.jsonl
+data/training_log.jsonl
+data/api_requests.jsonl
+data/domain_history.jsonl
+data/learning_progress.json
+data/learning_objectives.json
+data/error_examples.json
+data/knowledge_versions/
+data/training_checkpoints/
+data/backups/
+
 # Large model & data artifacts (keep out of git)
 data/finetuned-model/
 data/llm_finetuned/
