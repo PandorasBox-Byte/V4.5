@@ -1,10 +1,10 @@
 [
   [
-    "I want to code a program",
-    "Great! What type of program are you looking to code? Do you have a specific language or project in mind? Let me know what you need help with!"
+    "rewrite code for speed",
+    "Tested apply needs a manifest source. Set EVOAI_TESTED_APPLY_MANIFEST_URL or EVOAI_TESTED_APPLY_MANIFEST_PATH."
   ],
   [
-    "i want a simple hello script can you bild it for me ?",
-    "Sure! Here's a simple \"Hello, World!\" script in a few different programming languages. You can choose the one you prefer:\n\n### Python\n```python\nprint(\"Hello, World!\")\n```\n\n### JavaScript\n```javascript\nconsole.log(\"Hello, World!\");\n```\n\n### Java\n```java\npublic class HelloWorld {\n    public static void main(String[] args) {\n        System.out.println(\"Hello, World!\");\n    }\n}\n```\n\n### C\n```c\n#include <stdio.h>\n\nint main() {\n    printf(\"Hello, World!\\n\");\n    return 0;\n}\n```\n\n### Ruby\n```ruby\nputs \"Hello, World!\"\n```\n\nFeel free to pick one, and let me know if you need help running it or if you have another language in mind!"
+    "rewrite code for speed",
+    "Tested apply succeeded: 1 file(s) validated and applied."
   ]
 ]

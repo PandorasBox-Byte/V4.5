@@ -696,6 +696,24 @@ class Engine:
         _report(1.0, "ready")
         self._set_status("ready", "yes")
 
+        # Initialize autonomy systems (Phase 2 - autonomous learning)
+        self._autonomy_enabled = os.environ.get("EVOAI_AUTONOMOUS_LEARNING", "1").lower() in ("1", "true", "yes")
+        self._autonomy_systems = {}
+        if self._autonomy_enabled:
+            try:
+                from core.metrics_tracker import get_metrics_tracker
+                from core.gap_detector import get_gap_detector
+                from core.learning_loop import get_learning_loop
+                
+                self._autonomy_systems = {
+                    "metrics": get_metrics_tracker(),
+                    "gaps": get_gap_detector(),
+                    "learning": get_learning_loop()
+                }
+                _startup_log("Autonomy systems initialized")
+            except Exception as e:
+                _startup_log(f"Warning: Failed to initialize autonomy systems: {e}")
+
         # Clear brain activity log file for fresh start
         try:
             activity_file = os.path.join(os.getcwd(), "data", "brain_activity.log")
@@ -1468,6 +1486,41 @@ class Engine:
 
                 reply = language_utils.enhance_text(reply)
             except Exception:
+                pass
+
+        # Record metrics and detect gaps if autonomy is enabled
+        if self._autonomy_enabled and self._autonomy_systems:
+            try:
+                # Estimate response confidence from decision policy
+                confidence = decision.get("confidence", 0.5) if "decision" in locals() else 0.5
+                
+                # Record metrics
+                metrics = self._autonomy_systems.get("metrics")
+                if metrics:
+                    metrics.record_response(
+                        query=str(text),
+                        response=str(reply),
+                        confidence=float(confidence),
+                        duration_seconds=0.1  # Approximate
+                    )
+                
+                # Detect gaps if confidence is low
+                if confidence < 0.7:
+                    gaps = self._autonomy_systems.get("gaps")
+                    if gaps:
+                        gaps.detect_gap(
+                            query=str(text),
+                            response=str(reply),
+                            similarity_score=confidence
+                        )
+                    
+                    # Trigger learning if confidence is moderate
+                    if confidence < 0.7 and confidence > 0.4:
+                        learning = self._autonomy_systems.get("learning")
+                        if learning:
+                            learning.trigger_gap_research(str(text), confidence=confidence)
+            except Exception as e:
+                # Silently fail autonomy hooks to avoid breaking responses
                 pass
 
         return reply

@@ -1,0 +1,14 @@
+{
+  "https://en.wikipedia.org/wiki/Machine_learning": {
+    "timestamp": 1772310724.258765,
+    "result": {
+      "source_url": "https://en.wikipedia.org/wiki/Machine_learning",
+      "is_valid": true,
+      "trust_score": 0.95,
+      "quality_score": 0.5,
+      "combined_score": 0.815,
+      "reason": "Valid source",
+      "issues": []
+    }
+  }
+}

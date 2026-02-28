@@ -27,6 +27,41 @@ from core.auto_updater import run_startup_git_update, get_local_version
 from core import tui
 from core.brain_monitor import launch_brain_monitor_async, _get_platform, _is_ssh_session
 
+# Autonomy system imports (lazy-loaded to avoid circular dependencies)
+_autonomy_systems = None
+
+def _initialize_autonomy_systems():
+    """Initialize all autonomous learning systems."""
+    global _autonomy_systems
+    if _autonomy_systems is not None:
+        return _autonomy_systems
+    
+    try:
+        from core.metrics_tracker import get_metrics_tracker
+        from core.gap_detector import get_gap_detector
+        from core.error_learner import get_error_learner
+        from core.knowledge_manager import get_knowledge_manager
+        from core.curriculum_planner import get_curriculum_planner
+        from core.learning_loop import get_learning_loop
+        from core.continuous_trainer import get_continuous_trainer
+        from core.evolution_engine import get_evolution_engine
+        
+        _autonomy_systems = {
+            "metrics": get_metrics_tracker(),
+            "gaps": get_gap_detector(),
+            "errors": get_error_learner(),
+            "knowledge": get_knowledge_manager(),
+            "curriculum": get_curriculum_planner(),
+            "learning": get_learning_loop(),
+            "trainer": get_continuous_trainer(),
+            "evolution": get_evolution_engine()
+        }
+        print("[launcher] Autonomous learning systems initialized")
+        return _autonomy_systems
+    except Exception as e:
+        print(f"[launcher] Warning: Failed to initialize autonomy systems: {e}")
+        return {}
+
 PIDFILE = os.path.join("data", "engine.pid")
 _UPDATE_GUARD_ENV = "EVOAI_UPDATED_TARGET_VERSION"
 _brain_monitor_process = None  # Track brain monitor subprocess
@@ -448,6 +483,11 @@ def main():
                         warnings.simplefilter("ignore")
                         with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
                             eng = Engine(progress_cb=loader.report)
+                    
+                    # Initialize autonomous learning systems
+                    _initialize_autonomy_systems()
+                    loader.report(0.9, "Initializing autonomy systems", phase="startup")
+                    
                     loader.set_engine(eng)
                 except Exception:
                     # ensure loader shows failure
@@ -494,6 +534,24 @@ def main():
             if _repair_and_retry():
                 continue
         finally:
+            # Run autonomy cleanup: trigger training and evolution
+            if _autonomy_systems is not None:
+                try:
+                    trainer = _autonomy_systems.get("trainer")
+                    if trainer and trainer.should_train().get("should_train"):
+                        print("[launcher] Running continuous training...")
+                        trainer.train_async()
+                except Exception as e:
+                    print(f"[launcher] Training cleanup failed: {e}")
+                
+                try:
+                    evolution = _autonomy_systems.get("evolution")
+                    if evolution:
+                        print("[launcher] Running evolution cycle...")
+                        evolution.run_evolution_cycle()
+                except Exception as e:
+                    print(f"[launcher] Evolution cleanup failed: {e}")
+            
             if engine is not None:
                 try:
                     del engine

@@ -66,6 +66,10 @@ class DecisionPolicy:
         "research_query",
         "tested_apply",
         "code_assist",
+        "autonomous_learn",  # Trigger autonomous knowledge gap research
+        "knowledge_lookup",  # Search knowledge graph before responding
+        "sandbox_modify",  # Propose safe plugin/config modifications
+        "error_feedback",  # Record corrections for model improvement
     ]
 
     def __init__(self):
@@ -178,6 +182,16 @@ class DecisionPolicy:
             logits["research_query"] += 0.30
         if any(k in lowered for k in ("apply patch", "rewrite code", "self modify", "optimize code")):
             logits["tested_apply"] += 0.45
+        
+        # New autonomous learning actions
+        if any(k in lowered for k in ("learn", "research", "knowledge gap", "don't know")):
+            logits["autonomous_learn"] += 0.25
+        if any(k in lowered for k in ("lookup", "find", "search knowledge", "what do you know about")):
+            logits["knowledge_lookup"] += 0.20
+        if any(k in lowered for k in ("wrong", "incorrect", "mistake", "correction", "I meant")):
+            logits["error_feedback"] += 0.30
+        if any(k in lowered for k in ("improve", "optimize", "configure", "modify", "setting")):
+            logits["sandbox_modify"] += 0.15
 
         # Coding assistant detection: fix, implement, refactor, debug, generate, review
         coding_keywords = (

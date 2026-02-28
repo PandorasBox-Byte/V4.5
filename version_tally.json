@@ -1,7 +1,7 @@
 {
-  "current_version": "7.4.0",
+  "current_version": "7.5.0",
   "major": 7,
-  "minor": 4,
+  "minor": 5,
   "patch": 0,
   "rules": {
     "major": "Major structural changes (non-engine architecture shifts)",
@@ -134,6 +134,13 @@
       "from": "7.2.0",
       "to": "7.3.0",
       "reason": "Removed redundant virtual environments, standardized on .venv311 for PyTorch compatibility"
+    },
+    {
+      "date": "2026-02-28",
+      "change": "minor",
+      "from": "7.4.0",
+      "to": "7.5.0",
+      "reason": "Autonomous Evolution & Web Learning: local-first LLM, knowledge gap detection, multi-source research, continuous training, safe autonomous modifications, weekly evolution cycles"
     }
   ]
 }

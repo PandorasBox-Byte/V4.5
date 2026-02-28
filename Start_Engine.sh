@@ -68,6 +68,13 @@ export EVOAI_FORCE_TUI="1"
 # Keep brain monitor enabled by default.
 export EVOAI_ENABLE_BRAIN_MONITOR="${EVOAI_ENABLE_BRAIN_MONITOR:-1}"
 
+# Autonomous learning system defaults (Phase 2).
+export EVOAI_AUTONOMOUS_LEARNING="${EVOAI_AUTONOMOUS_LEARNING:-1}"
+export EVOAI_LEARNING_AUTO_APPROVE_THRESHOLD="${EVOAI_LEARNING_AUTO_APPROVE_THRESHOLD:-0.7}"
+export EVOAI_LLM_PRIORITY="${EVOAI_LLM_PRIORITY:-local}"
+export EVOAI_ENABLE_AUTONOMY_EVOLUTION="${EVOAI_ENABLE_AUTONOMY_EVOLUTION:-1}"
+export EVOAI_ENABLE_CONTINUOUS_TRAINING="${EVOAI_ENABLE_CONTINUOUS_TRAINING:-1}"
+
 echo "Starting EvoAI launcher (TUI if available). Press q or Ctrl-C to quit."
 
 # Exec the launcher so signals are forwarded and TTY is preserved
