@@ -1,20 +1,39 @@
+# Virtual environments
 v4env/
-__pycache__/
-.DS_Store
-data/memory.json
-.pytest_cache/
-*.pyc
-env/
-venv/
-*.egg-info/
-dist/
-# Large model & data artifacts (keep out of git)
-data/finetuned-model/
-data/embeddings.pt
-# ignore venvs
 v311env/
 .venv/
 .venv311/
+env/
+venv/
 
-# runtime transient files
+# Python caches and artifacts
+__pycache__/
+.pytest_cache/
+*.pyc
+*.pyo
+*.egg-info/
+dist/
+build/
+
+# IDE/OS
+.DS_Store
+.vscode/
+.idea/
+
+# Data and runtime
+data/memory.json
 data/tmp*
+data/engine.pid
+*.log
+
+# Large model & data artifacts (keep out of git)
+data/finetuned-model/
+data/llm_finetuned/
+data/embeddings.pt
+data/core_vocab.pt
+
+# Development/debug artifacts
+*.swp
+*.swo
+*~
+.env.local

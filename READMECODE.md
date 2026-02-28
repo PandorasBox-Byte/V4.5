@@ -1,7 +1,7 @@
 # READMECODE (Technical Context + Change History)
 
 This document is a technical handoff/reference for developers and AI assistants.
-It describes what EvoAI V7.1.0 (V7) is, how it starts, model/data flow, and major fixes made in this workspace.
+It describes what EvoAI V7.2.0 (V7) is, how it starts, model/data flow, and major fixes made in this workspace.
 
 ## Versioning rule (project contract)
 
@@ -20,6 +20,7 @@ It describes what EvoAI V7.1.0 (V7) is, how it starts, model/data flow, and majo
 - `7.0.3` **PATCH**: updater protection: excluded `core/auto_updater.py` from repairs (redundancy guarantee); added standalone `repair.sh` CLI script.
 - `7.0.4` **PATCH**: git metadata filtering: excluded `.gitignore`, `.gitattributes`, `.github/` from file verification/repair for cleaner standalone distributions.
 - `7.1.0` **MINOR**: CodeAssistant orchestrator: autonomous coding workflows with decision routing, CodeIntel analysis, LLM generation, validation, and safety gates.
+- `7.2.0` **MINOR**: Cleanup and optimization: unified core architecture with consolidated exports, removed temp/debug files, enhanced Engine documentation, optimized repository structure.
 - `6.0.0` **MAJOR**: deep optimization pass across runtime persistence, startup latency, plugin/API routing efficiency, and startup script consolidation.
 - `5.0.0` **MAJOR**: backend migration + decision layer integration + startup/runtime contract changes.
 - `5.0.1` **PATCH**: TUI version label and startup checklist grid rendering updates.
@@ -29,7 +30,30 @@ It describes what EvoAI V7.1.0 (V7) is, how it starts, model/data flow, and majo
 - `5.1.3` **PATCH**: launcher token prompt handling fixed for non-interactive mode and pre-set env tokens.
 - `5.1.4` **PATCH**: updater normalization extended to tracked non-runtime files to prevent partial updates.
 
-## Latest minor change (7.1.0)
+## Latest minor change (7.2.0)
+
+- Unified core architecture in `core/__init__.py`:
+  - Consolidated module exports for integrated system access
+  - Simplified imports: Engine, DecisionPolicy, SafetyGate, CodeAssistant directly from core
+  - All modules remain directly importable from their original paths
+  - Compatibility shims preserved for huggingface_hub
+- Enhanced Engine class documentation:
+  - Comprehensive architecture overview in Engine docstring
+  - Integration flow documentation (query → decision → safety → action → audit → persist)
+  - Environment variable reference
+  - Clear component responsibilities
+- Repository cleanup:
+  - Removed all temp files from data/ (tmp*, engine.pid)
+  - Removed debug artifacts (llm_finetuned_debug/, update_test.txt)
+  - Removed unused modules (network_scanner.py, memory.example.json)
+  - Cleaned __pycache__ from source directories
+  - Enhanced .gitignore with comprehensive patterns
+- Optimization:
+  - Removed network_scanner stub and related engine code
+  - Streamlined module import structure
+  - Improved repository cleanliness for standalone deployment
+
+## Previous minor change (7.1.0)
 
 - Added `core/code_assistant.py` implementing `CodeAssistant` orchestrator class for autonomous coding workflows.
 - CodeAssistant coordinates: analyze (CodeIntel) → generate (LLM) → validate (TestedApply) → apply (safety-gated).

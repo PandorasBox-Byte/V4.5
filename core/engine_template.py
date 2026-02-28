@@ -307,6 +307,33 @@ class SmartResponder(SimpleResponder):
 
 
 class Engine:
+    """Local AI assistant engine with integrated decision routing and autonomy governance.
+    
+    Architecture Overview:
+    - Decision Policy: Routes user queries to appropriate action handlers based on intent
+    - Safety Gate: Validates all autonomous actions against runtime policy
+    - CodeAssistant: Specialized orchestrator for coding workflows (analyze→generate→validate→apply)
+    - Toolkits: CodeIntelToolkit (code analysis), ResearchToolkit (external research)
+    - Orchestrators: TestedApplyOrchestrator (validated code application), TrainerOrchestrator (model training)
+    - Persistence: Memory (conversation), EmbeddingsCache (semantic vectors)
+    - External: GitHubBackend (external LLM), PluginManager (extensibility)
+    - Governance: Safety gates, autonomy budget, audit events, outcome logging
+    
+    Integration Flow:
+    1. User query → respond()
+    2. respond() → Decision Policy determines action type
+    3. Decision Policy checks Safety Gate for permission
+    4. Action routes to handler (code_assist, llm_generate, research_query, etc.)
+    5. Handler executes through specialized toolkit/orchestrator
+    6. All autonomous actions logged in audit stream
+    7. Memory/embeddings updated and persisted
+    
+    Environment Controls:
+    - EVOAI_DECISION_LAYER: Enable/disable decision routing
+    - EVOAI_AUTONOMY_PAUSED: Pause all autonomous actions
+    - EVOAI_RESPONDER: Choose responder (simple vs smart)
+    - EVOAI_BACKEND_PROVIDER: External backend (github)
+    """
     def __init__(self, progress_cb=None):
         """Engine constructor.
 
@@ -666,16 +693,6 @@ class Engine:
                 self._set_status("api", "running")
             except Exception:
                 self._set_status("api", "error")
-
-        # optional network awareness stub (requires explicit user consent)
-        if os.environ.get("EVOAI_ENABLE_NET_SCAN", "").lower() in ("1", "true", "yes", "permitted"):
-            try:
-                from core.network_scanner import scan_local_network
-
-                scan_local_network()
-                self._set_status("network_scan", "noop")
-            except Exception:
-                self._set_status("network_scan", "error")
 
         # check for optional auto-update URL
         update_url = os.environ.get("EVOAI_AUTO_UPDATE_URL", "").strip()

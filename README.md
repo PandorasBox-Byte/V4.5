@@ -1,10 +1,10 @@
-# EvoAI V7.1.0 (V7)
+# EvoAI V7.2.0 (V7)
 
 Local assistant runtime with memory, semantic similarity retrieval, optional local LLM generation, optional GitHub Models backend, plugin support, API server, startup self-test, autonomous coding assistant with specialized CodeIntel → Generate → Validate → Apply pipeline.
 
 ## Versioning tally system
 
-- Current release: `7.1.0` (`V7`)
+- Current release: `7.2.0` (`V7`)
 - Version format: `MAJOR.MINOR.PATCH`
 - `MAJOR`: increment for major structural changes (non-engine architecture shifts)
 - `MINOR`: increment for feature-level/minor changes
@@ -20,7 +20,16 @@ python scripts/bump_version.py --change patch --reason "describe the bug fix"
 
 This updates both `version_tally.json` and `setup.cfg`.
 
-## Latest minor summary (7.1.0)
+## Latest minor summary (7.2.0)
+
+- Unified core architecture: consolidated module exports in `core/__init__.py` for integrated system access.
+- Cleaned workspace: removed all temporary files, debug artifacts, unused modules (network_scanner), example files.
+- Enhanced Engine docstring with complete architecture overview and integration flow documentation.
+- Optimized .gitignore for cleaner repository tracking (temp files, debug artifacts, build outputs).
+- Removed __pycache__ from source directories, improved module import structure.
+- All core components now directly importable and interwoven through Engine coordinator.
+
+## Previous minor summary (7.1.0)
 
 - Introduced `CodeAssistant` orchestrator module coordinating autonomous coding workflows.
 - Decision policy recognizes coding intents (fix, debug, implement, refactor, optimize, review) and routes to `code_assist` action.
@@ -54,6 +63,7 @@ This updates both `version_tally.json` and `setup.cfg`.
 - `7.0.3` **PATCH**: updater protection: excluded `core/auto_updater.py` from repairs (redundancy guarantee); added standalone `repair.sh` CLI script.
 - `7.0.4` **PATCH**: git metadata filtering: excluded `.gitignore`, `.gitattributes`, `.github/` from file verification/repair for cleaner standalone distributions.
 - `7.1.0` **MINOR**: CodeAssistant orchestrator: autonomous coding workflows with decision routing, CodeIntel analysis, LLM generation, validation, and safety gates.
+- `7.2.0` **MINOR**: Cleanup and optimization: unified core architecture, removed temp/debug files, enhanced integration, improved documentation.
 - `6.0.0` **MAJOR**: runtime/startup optimization pass, plugin/API efficiency improvements, startup script consolidation, and cleanup of legacy backup artifacts.
 - `5.0.0` **MAJOR**: backend/architecture shift (GitHub backend integration, decision layer, startup/runtime contract updates).
 - `5.0.1` **PATCH**: TUI version label + startup checklist grid layout improvements.
