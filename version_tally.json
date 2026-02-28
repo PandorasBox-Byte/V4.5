@@ -1,8 +1,8 @@
 {
-  "current_version": "7.0.2",
+  "current_version": "7.0.3",
   "major": 7,
   "minor": 0,
-  "patch": 2,
+  "patch": 3,
   "rules": {
     "major": "Major structural changes (non-engine architecture shifts)",
     "minor": "Feature-level and other minor changes",
@@ -85,6 +85,13 @@
       "from": "7.0.1",
       "to": "7.0.2",
       "reason": "Enhancement: updater now verifies and auto-repairs missing/divergent files from remote tag (concrete, complete sync)"
+    },
+    {
+      "date": "2026-02-28",
+      "change": "patch",
+      "from": "7.0.2",
+      "to": "7.0.3",
+      "reason": "Updater protection and repair CLI"
     }
   ]
 }

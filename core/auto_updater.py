@@ -627,8 +627,13 @@ def repair_to_remote_state(
     divergent = verification.get("divergent_files", [])
     
     to_repair = list(set(missing) | set(divergent))
+    
+    # Protect the updater itself from being modified/repaired
+    # This ensures we always have a working copy for future repairs
+    to_repair = [f for f in to_repair if f != "core/auto_updater.py"]
+    
     if not to_repair:
-        _progress(1.0, "No files to repair")
+        _progress(1.0, "No files to repair (updater is protected)")
         return True, "ok"
     
     _progress(0.20, f"Repairing {len(to_repair)} file(s) from {target_tag}...")
