@@ -3,6 +3,96 @@ from typing import List, Tuple
 import json
 
 
+def train_governance_policy(
+    outcomes_path: str = os.path.join("data", "autonomy_outcomes.jsonl"),
+    output_dir: str = os.path.join("data", "governance_policy"),
+) -> str:
+    """Build lightweight governance policy metadata from autonomy outcome logs.
+
+    This routine summarizes action outcomes and retention-score quality so the
+    runtime can tune autonomy conservatism over time.
+    """
+    os.makedirs(output_dir, exist_ok=True)
+
+    events: List[dict] = []
+    if os.path.exists(outcomes_path):
+        try:
+            with open(outcomes_path, "r", encoding="utf-8") as f:
+                for raw in f:
+                    line = raw.strip()
+                    if not line:
+                        continue
+                    try:
+                        obj = json.loads(line)
+                    except Exception:
+                        continue
+                    if isinstance(obj, dict):
+                        events.append(obj)
+        except Exception:
+            events = []
+
+    action_stats: dict[str, dict] = {}
+    score_sum = 0.0
+    score_count = 0
+
+    for event in events:
+        action = str(event.get("action", "unknown"))
+        reason = str(event.get("reason", "unknown"))
+        kind = str(event.get("kind", "unknown"))
+        meta = event.get("meta") if isinstance(event.get("meta"), dict) else {}
+        ok_flag = bool(meta.get("ok", kind == "allow" or reason == "ok"))
+
+        bucket = action_stats.setdefault(
+            action,
+            {
+                "total": 0,
+                "ok": 0,
+                "blocked": 0,
+                "reasons": {},
+            },
+        )
+        bucket["total"] += 1
+        if ok_flag:
+            bucket["ok"] += 1
+        if kind == "blocked":
+            bucket["blocked"] += 1
+        reasons = bucket["reasons"]
+        reasons[reason] = int(reasons.get(reason, 0)) + 1
+
+        if "retention_score" in meta:
+            try:
+                score_sum += float(meta.get("retention_score", 0.0))
+                score_count += 1
+            except Exception:
+                pass
+
+    for bucket in action_stats.values():
+        total = max(1, int(bucket.get("total", 0)))
+        bucket["ok_rate"] = float(bucket.get("ok", 0)) / total
+        bucket["block_rate"] = float(bucket.get("blocked", 0)) / total
+
+    avg_retention = (score_sum / score_count) if score_count > 0 else 0.0
+    recommendation = "balanced"
+    if avg_retention < 0.45:
+        recommendation = "tighten_autonomy"
+    elif avg_retention > 0.75:
+        recommendation = "loosen_autonomy"
+
+    metadata = {
+        "events": len(events),
+        "action_stats": action_stats,
+        "retention_scores_seen": score_count,
+        "avg_retention_score": round(avg_retention, 4),
+        "recommendation": recommendation,
+        "outcomes_path": outcomes_path,
+    }
+
+    with open(os.path.join(output_dir, "metadata.json"), "w", encoding="utf-8") as f:
+        json.dump(metadata, f, indent=2)
+
+    return output_dir
+
+
 def train_embeddings(
     examples: List[Tuple[str, str]],
     model_name: str = "all-MiniLM-L6-v2",
@@ -293,6 +383,10 @@ if __name__ == "__main__":
     dec.add_argument("--width", type=int, default=512)
     dec.add_argument("--depth", type=int, default=12)
 
+    gov = sub.add_parser("governance", help="train governance policy from outcomes")
+    gov.add_argument("--outcomes", default=os.path.join("data", "autonomy_outcomes.jsonl"))
+    gov.add_argument("--out", default=os.path.join("data", "governance_policy"))
+
     args = parser.parse_args()
     if args.cmd == "embeddings":
         tuples = list(zip(args.pairs[::2], args.pairs[1::2]))
@@ -312,5 +406,8 @@ if __name__ == "__main__":
             depth=args.depth,
         )
         print("saved decision policy to", path)
+    elif args.cmd == "governance":
+        path = train_governance_policy(outcomes_path=args.outcomes, output_dir=args.out)
+        print("saved governance policy to", path)
     else:
         parser.print_help()

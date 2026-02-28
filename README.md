@@ -1,10 +1,10 @@
-# EvoAI V6.0.0 (V6)
+# EvoAI V7.0.0 (V7)
 
 Local assistant runtime with memory, semantic similarity retrieval, optional local LLM generation, optional GitHub Models backend, plugin support, API server, and startup self-test.
 
 ## Versioning tally system
 
-- Current release: `6.0.0` (`V6`)
+- Current release: `7.0.0` (`V7`)
 - Version format: `MAJOR.MINOR.PATCH`
 - `MAJOR`: increment for major structural changes (non-engine architecture shifts)
 - `MINOR`: increment for feature-level/minor changes
@@ -20,13 +20,13 @@ python scripts/bump_version.py --change patch --reason "describe the bug fix"
 
 This updates both `version_tally.json` and `setup.cfg`.
 
-## Latest major summary (6.0.0)
+## Latest major summary (7.0.0)
 
-- Per-turn runtime optimized with batched memory/embedding persistence plus safe exit flush.
-- Startup path optimized by removing loader wait on updater completion in interactive mode.
-- Language utilities optimized with WordNet readiness caching and synonym result caching.
-- Knowledge plugin routing optimized with lightweight keyword prefiltering before semantic scoring.
-- Startup script and monitor/train wrappers simplified to reduce duplicate paths and startup overhead.
+- Introduced autonomous governance controls with runtime budget/pause enforcement and decision-level gating.
+- Added centralized safety gate checks for autonomous, network, and self-modification actions.
+- Added `tested_apply` orchestration with validate/apply/rollback flow and retention-score checks.
+- Added governance and audit API endpoints plus runtime status telemetry for policy visibility.
+- Closed the loop with startup policy autotuning from governance trainer metadata (`tighten`/`balanced`/`loosen`).
 
 ## Previous patch summary (5.1.4)
 
@@ -48,6 +48,7 @@ This updates both `version_tally.json` and `setup.cfg`.
 
 ## Release history (major/minor/patch)
 
+- `7.0.0` **MAJOR**: autonomous governance architecture release (safety gates, policy controls, tested-apply orchestration, audit/governance APIs, and runtime closed-loop policy adaptation).
 - `6.0.0` **MAJOR**: runtime/startup optimization pass, plugin/API efficiency improvements, startup script consolidation, and cleanup of legacy backup artifacts.
 - `5.0.0` **MAJOR**: backend/architecture shift (GitHub backend integration, decision layer, startup/runtime contract updates).
 - `5.0.1` **PATCH**: TUI version label + startup checklist grid layout improvements.

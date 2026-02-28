@@ -60,6 +60,11 @@ class DecisionPolicy:
         "llm_generate",
         "simple_reply",
         "proactive_prompt",
+        "autonomy_plan",
+        "safety_check",
+        "code_intel_query",
+        "research_query",
+        "tested_apply",
     ]
 
     def __init__(self):
@@ -160,6 +165,19 @@ class DecisionPolicy:
             logits["memory_hint"] += 0.2
         if self.allow_autonomy and features[2] > 0:
             logits["proactive_prompt"] += 0.05
+
+        lowered = (text or "").strip().lower()
+        if any(k in lowered for k in ("plan", "objective", "goal", "autonomous")):
+            logits["autonomy_plan"] += 0.35
+        if any(k in lowered for k in ("safety", "guardrail", "risk", "policy")):
+            logits["safety_check"] += 0.35
+        if any(k in lowered for k in ("code", "symbol", "function", "optimize")):
+            logits["code_intel_query"] += 0.30
+        if any(k in lowered for k in ("research", "internet", "web", "docs")):
+            logits["research_query"] += 0.30
+        if any(k in lowered for k in ("apply patch", "rewrite code", "self modify", "optimize code")):
+            logits["tested_apply"] += 0.45
+
         logits["delegate"] += 0.4
 
         if self.model is not None and torch is not None:

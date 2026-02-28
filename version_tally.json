@@ -1,6 +1,6 @@
 {
-  "current_version": "6.0.0",
-  "major": 6,
+  "current_version": "7.0.0",
+  "major": 7,
   "minor": 0,
   "patch": 0,
   "rules": {
@@ -64,6 +64,13 @@
       "from": "5.1.4",
       "to": "6.0.0",
       "reason": "Major optimization release: runtime persistence batching, startup latency improvements, plugin/API efficiency, script consolidation, and cleanup"
+    },
+    {
+      "date": "2026-02-28",
+      "change": "major",
+      "from": "6.0.0",
+      "to": "7.0.0",
+      "reason": "Major V7 release: autonomous governance, safety gates, tested-apply orchestration, runtime policy closed-loop, and governance APIs"
     }
   ]
 }

@@ -1,6 +1,7 @@
 import os
 import shutil
 import unittest
+import json
 
 from core import trainer
 
@@ -8,7 +9,7 @@ from core import trainer
 class TrainerTests(unittest.TestCase):
     def setUp(self):
         # cleanup potential output directories
-        for path in ("data/finetuned-model", "data/llm_finetuned", "data/decision_policy"):
+        for path in ("data/finetuned-model", "data/llm_finetuned", "data/decision_policy", "data/governance_policy"):
             if os.path.isdir(path):
                 shutil.rmtree(path)
 
@@ -46,6 +47,25 @@ class TrainerTests(unittest.TestCase):
             os.path.exists(os.path.join(out, "metadata.json"))
             or os.path.exists(os.path.join(out, "fallback.json"))
         )
+
+    def test_train_governance_policy_outputs_artifacts(self):
+        os.makedirs("data", exist_ok=True)
+        outcomes = os.path.join("data", "autonomy_outcomes.jsonl")
+        with open(outcomes, "w", encoding="utf-8") as f:
+            f.write('{"kind":"allow","action":"code_intel_query","reason":"ok"}\n')
+            f.write('{"kind":"outcome","action":"tested_apply","reason":"ok","meta":{"ok":true,"retention_score":0.82}}\n')
+            f.write('{"kind":"blocked","action":"tested_apply","reason":"autonomy_budget_exhausted"}\n')
+
+        out = trainer.train_governance_policy(
+            outcomes_path=outcomes,
+            output_dir="data/governance_policy",
+        )
+        self.assertTrue(os.path.isdir(out))
+        self.assertTrue(os.path.exists(os.path.join(out, "metadata.json")))
+        with open(os.path.join(out, "metadata.json"), "r", encoding="utf-8") as f:
+            meta = json.load(f)
+        self.assertIn("action_stats", meta)
+        self.assertIn("avg_retention_score", meta)
 
 
 if __name__ == "__main__":

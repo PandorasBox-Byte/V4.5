@@ -240,6 +240,284 @@ class EngineSmokeTests(unittest.TestCase):
         self.assertIn("decision_layer", status)
         self.assertIn("decision_depth", status)
         self.assertIn("decision_width", status)
+        self.assertIn("safety_gate", status)
+        self.assertIn("safety_allow_network", status)
+        self.assertIn("safety_allow_self_modify", status)
+        self.assertIn("autonomy_paused", status)
+        self.assertIn("autonomy_budget_max", status)
+        self.assertIn("autonomy_budget_remaining", status)
+        self.assertIn("audit_events", status)
+        self.assertIn("governance_policy_loaded", status)
+        self.assertIn("governance_policy_recommendation", status)
+        self.assertIn("governance_policy_applied", status)
+
+    def test_governance_policy_tightens_budget_defaults(self):
+        policy_dir = os.path.join("data", "governance_policy")
+        os.makedirs(policy_dir, exist_ok=True)
+        policy_path = os.path.join(policy_dir, "metadata.json")
+        with open(policy_path, "w", encoding="utf-8") as f:
+            json.dump({"recommendation": "tighten_autonomy"}, f)
+
+        prev_autotune = os.environ.get("EVOAI_GOVERNANCE_POLICY_AUTOTUNE")
+        prev_budget_max = os.environ.get("EVOAI_AUTONOMY_BUDGET_MAX")
+        prev_budget_remaining = os.environ.get("EVOAI_AUTONOMY_BUDGET_REMAINING")
+        prev_thes = os.environ.get("EVOAI_USE_THESAURUS")
+
+        os.environ["EVOAI_GOVERNANCE_POLICY_AUTOTUNE"] = "1"
+        os.environ.pop("EVOAI_AUTONOMY_BUDGET_MAX", None)
+        os.environ.pop("EVOAI_AUTONOMY_BUDGET_REMAINING", None)
+        os.environ["EVOAI_USE_THESAURUS"] = "0"
+
+        try:
+            engine = self.Engine()
+            status = engine.status()
+            self.assertEqual(status.get("governance_policy_loaded"), "true")
+            self.assertEqual(status.get("governance_policy_recommendation"), "tighten_autonomy")
+            self.assertEqual(status.get("governance_policy_applied"), "budget_tightened")
+            self.assertLess(int(status.get("autonomy_budget_max", "0")), 25)
+        finally:
+            if prev_autotune is None:
+                os.environ.pop("EVOAI_GOVERNANCE_POLICY_AUTOTUNE", None)
+            else:
+                os.environ["EVOAI_GOVERNANCE_POLICY_AUTOTUNE"] = prev_autotune
+
+            if prev_budget_max is None:
+                os.environ.pop("EVOAI_AUTONOMY_BUDGET_MAX", None)
+            else:
+                os.environ["EVOAI_AUTONOMY_BUDGET_MAX"] = prev_budget_max
+
+            if prev_budget_remaining is None:
+                os.environ.pop("EVOAI_AUTONOMY_BUDGET_REMAINING", None)
+            else:
+                os.environ["EVOAI_AUTONOMY_BUDGET_REMAINING"] = prev_budget_remaining
+
+            if prev_thes is None:
+                os.environ.pop("EVOAI_USE_THESAURUS", None)
+            else:
+                os.environ["EVOAI_USE_THESAURUS"] = prev_thes
+
+    def test_governance_pause_blocks_autonomous_action(self):
+        prev_modify = os.environ.get("EVOAI_ALLOW_SELF_MODIFY")
+        prev_thes = os.environ.get("EVOAI_USE_THESAURUS")
+        os.environ["EVOAI_ALLOW_SELF_MODIFY"] = "1"
+        os.environ["EVOAI_USE_THESAURUS"] = "0"
+        try:
+            engine = self.Engine()
+            engine.update_governance({"autonomy_paused": True})
+            with patch.object(
+                engine.decision_policy,
+                "decide",
+                return_value={"action": "tested_apply", "confidence": 1.0, "elapsed_ms": 1.0, "reason": "unit"},
+            ):
+                reply = engine.respond("rewrite code now")
+            self.assertIn("governance blocked", reply.lower())
+            self.assertIn("autonomy_paused", engine.status().get("safety_last_result", ""))
+        finally:
+            if prev_modify is None:
+                os.environ.pop("EVOAI_ALLOW_SELF_MODIFY", None)
+            else:
+                os.environ["EVOAI_ALLOW_SELF_MODIFY"] = prev_modify
+            if prev_thes is None:
+                os.environ.pop("EVOAI_USE_THESAURUS", None)
+            else:
+                os.environ["EVOAI_USE_THESAURUS"] = prev_thes
+
+    def test_governance_budget_exhaustion_blocks_second_action(self):
+        prev_thes = os.environ.get("EVOAI_USE_THESAURUS")
+        os.environ["EVOAI_USE_THESAURUS"] = "0"
+        try:
+            engine = self.Engine()
+            engine.update_governance(
+                {
+                    "autonomy_paused": False,
+                    "autonomy_budget_max": 1,
+                    "autonomy_budget_remaining": 1,
+                }
+            )
+
+            with patch.object(
+                engine.decision_policy,
+                "decide",
+                return_value={"action": "code_intel_query", "confidence": 1.0, "elapsed_ms": 1.0, "reason": "unit"},
+            ):
+                first = engine.respond("analyze optimize path")
+                second = engine.respond("analyze optimize path again")
+
+            self.assertIn("code intel", first.lower())
+            self.assertIn("governance blocked", second.lower())
+            self.assertEqual(engine.status().get("autonomy_budget_remaining"), "0")
+            self.assertIn("autonomy_budget_exhausted", engine.status().get("safety_last_result", ""))
+        finally:
+            if prev_thes is None:
+                os.environ.pop("EVOAI_USE_THESAURUS", None)
+            else:
+                os.environ["EVOAI_USE_THESAURUS"] = prev_thes
+
+    def test_safety_gate_blocks_external_backend(self):
+        prev_net = os.environ.get("EVOAI_ALLOW_NETWORK_ACTIONS")
+        prev_chat = os.environ.get("EVOAI_COPILOT_CHAT")
+        prev_thes = os.environ.get("EVOAI_USE_THESAURUS")
+        os.environ["EVOAI_ALLOW_NETWORK_ACTIONS"] = "0"
+        os.environ["EVOAI_COPILOT_CHAT"] = "1"
+        os.environ["EVOAI_USE_THESAURUS"] = "0"
+        try:
+            engine = self.Engine()
+
+            class DummyExternal:
+                def generate_sync(self, prompt, model=None, **kwargs):
+                    return "External backend reply"
+
+            engine.external_backend = DummyExternal()
+            reply = engine.respond("please use internet research")
+            status = engine.status()
+            self.assertNotIn("External backend reply", reply)
+            self.assertIn("blocked", status.get("safety_last_result", ""))
+        finally:
+            if prev_net is None:
+                os.environ.pop("EVOAI_ALLOW_NETWORK_ACTIONS", None)
+            else:
+                os.environ["EVOAI_ALLOW_NETWORK_ACTIONS"] = prev_net
+            if prev_chat is None:
+                os.environ.pop("EVOAI_COPILOT_CHAT", None)
+            else:
+                os.environ["EVOAI_COPILOT_CHAT"] = prev_chat
+            if prev_thes is None:
+                os.environ.pop("EVOAI_USE_THESAURUS", None)
+            else:
+                os.environ["EVOAI_USE_THESAURUS"] = prev_thes
+
+    def test_tested_apply_blocked_without_self_modify_permission(self):
+        prev_modify = os.environ.get("EVOAI_ALLOW_SELF_MODIFY")
+        prev_thes = os.environ.get("EVOAI_USE_THESAURUS")
+        os.environ["EVOAI_ALLOW_SELF_MODIFY"] = "0"
+        os.environ["EVOAI_USE_THESAURUS"] = "0"
+        try:
+            engine = self.Engine()
+            with patch.object(
+                engine.decision_policy,
+                "decide",
+                return_value={"action": "tested_apply", "confidence": 1.0, "elapsed_ms": 1.0, "reason": "unit"},
+            ):
+                reply = engine.respond("optimize code and rewrite now")
+            self.assertIn("safe mode", reply.lower())
+            self.assertIn("blocked", engine.status().get("safety_last_result", ""))
+        finally:
+            if prev_modify is None:
+                os.environ.pop("EVOAI_ALLOW_SELF_MODIFY", None)
+            else:
+                os.environ["EVOAI_ALLOW_SELF_MODIFY"] = prev_modify
+            if prev_thes is None:
+                os.environ.pop("EVOAI_USE_THESAURUS", None)
+            else:
+                os.environ["EVOAI_USE_THESAURUS"] = prev_thes
+
+    def test_tested_apply_scaffold_when_self_modify_allowed(self):
+        prev_modify = os.environ.get("EVOAI_ALLOW_SELF_MODIFY")
+        prev_thes = os.environ.get("EVOAI_USE_THESAURUS")
+        os.environ["EVOAI_ALLOW_SELF_MODIFY"] = "1"
+        os.environ["EVOAI_USE_THESAURUS"] = "0"
+        try:
+            engine = self.Engine()
+            with patch.object(
+                engine.decision_policy,
+                "decide",
+                return_value={"action": "tested_apply", "confidence": 1.0, "elapsed_ms": 1.0, "reason": "unit"},
+            ):
+                reply = engine.respond("rewrite code for speed")
+            self.assertIn("manifest", reply.lower())
+            self.assertEqual(engine.status().get("safety_last_result"), "ok")
+            self.assertEqual(engine.status().get("tested_apply_last_ok"), "false")
+
+            with patch.object(
+                engine.tested_apply_orchestrator,
+                "run",
+                return_value={
+                    "ok": True,
+                    "summary": "Tested apply succeeded: 1 file(s) validated and applied.",
+                    "reason": "ok",
+                    "files": 1,
+                    "retention_score": 0.82,
+                },
+            ):
+                with patch.object(
+                    engine.decision_policy,
+                    "decide",
+                    return_value={"action": "tested_apply", "confidence": 1.0, "elapsed_ms": 1.0, "reason": "unit"},
+                ):
+                    reply2 = engine.respond("rewrite code for speed")
+
+            self.assertIn("succeeded", reply2.lower())
+            self.assertEqual(engine.status().get("tested_apply_last_ok"), "true")
+            self.assertEqual(engine.status().get("tested_apply_last_reason"), "ok")
+            self.assertEqual(engine.status().get("tested_apply_last_files"), "1")
+            self.assertEqual(engine.status().get("tested_apply_last_score"), "0.820")
+        finally:
+            if prev_modify is None:
+                os.environ.pop("EVOAI_ALLOW_SELF_MODIFY", None)
+            else:
+                os.environ["EVOAI_ALLOW_SELF_MODIFY"] = prev_modify
+            if prev_thes is None:
+                os.environ.pop("EVOAI_USE_THESAURUS", None)
+            else:
+                os.environ["EVOAI_USE_THESAURUS"] = prev_thes
+
+    def test_code_intel_query_returns_real_summary(self):
+        prev_thes = os.environ.get("EVOAI_USE_THESAURUS")
+        os.environ["EVOAI_USE_THESAURUS"] = "0"
+        try:
+            engine = self.Engine()
+            with patch.object(
+                engine.decision_policy,
+                "decide",
+                return_value={"action": "code_intel_query", "confidence": 1.0, "elapsed_ms": 1.0, "reason": "unit"},
+            ):
+                reply = engine.respond("find optimize function paths")
+            self.assertIn("code intel", reply.lower())
+            self.assertIn("hotspots", reply.lower())
+            self.assertTrue(int(engine.status().get("code_intel_last_matches", "0")) >= 0)
+        finally:
+            if prev_thes is None:
+                os.environ.pop("EVOAI_USE_THESAURUS", None)
+            else:
+                os.environ["EVOAI_USE_THESAURUS"] = prev_thes
+
+    def test_research_query_uses_plugin_findings(self):
+        prev_thes = os.environ.get("EVOAI_USE_THESAURUS")
+        prev_web = os.environ.get("EVOAI_RESEARCH_ENABLE_WEB")
+        prev_resp = os.environ.get("EVOAI_RESPONDER")
+        os.environ["EVOAI_USE_THESAURUS"] = "0"
+        os.environ["EVOAI_RESEARCH_ENABLE_WEB"] = "0"
+        os.environ["EVOAI_RESPONDER"] = "smart"
+
+        path = os.path.join("data", "knowledge.txt")
+        with open(path, "w", encoding="utf-8") as f:
+            f.write("The sky is blue\n")
+
+        try:
+            engine = self.Engine()
+            with patch.object(
+                engine.decision_policy,
+                "decide",
+                return_value={"action": "research_query", "confidence": 1.0, "elapsed_ms": 1.0, "reason": "unit"},
+            ):
+                reply = engine.respond("Please research what color is the sky")
+            self.assertIn("research:", reply.lower())
+            self.assertIn("top result", reply.lower())
+            self.assertTrue(int(engine.status().get("research_last_plugin_hits", "0")) >= 1)
+        finally:
+            open(path, "w").close()
+            if prev_thes is None:
+                os.environ.pop("EVOAI_USE_THESAURUS", None)
+            else:
+                os.environ["EVOAI_USE_THESAURUS"] = prev_thes
+            if prev_web is None:
+                os.environ.pop("EVOAI_RESEARCH_ENABLE_WEB", None)
+            else:
+                os.environ["EVOAI_RESEARCH_ENABLE_WEB"] = prev_web
+            if prev_resp is None:
+                os.environ.pop("EVOAI_RESPONDER", None)
+            else:
+                os.environ["EVOAI_RESPONDER"] = prev_resp
 
     def test_decision_layer_can_be_disabled(self):
         prev = os.environ.get("EVOAI_ENABLE_DECISION_LAYER")

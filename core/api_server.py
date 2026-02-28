@@ -30,19 +30,47 @@ class ChatHandler(BaseHTTPRequestHandler):
         self.end_headers()
 
     def do_GET(self):
-        if self._path_only(self.path) == "/status":
+        path = self._path_only(self.path)
+        if path == "/status":
             self._set_json(200)
             try:
                 data = self.server.engine.status()
             except Exception:
                 data = {"error": "could not read status"}
             self.wfile.write(json.dumps(data).encode())
+        elif path == "/governance":
+            self._set_json(200)
+            try:
+                if hasattr(self.server.engine, "governance_status"):
+                    data = self.server.engine.governance_status()
+                else:
+                    st = self.server.engine.status()
+                    data = {
+                        "autonomy_paused": str(st.get("autonomy_paused", "false")).lower() == "true",
+                        "autonomy_budget_max": int(st.get("autonomy_budget_max", 0)),
+                        "autonomy_budget_remaining": int(st.get("autonomy_budget_remaining", 0)),
+                        "audit_events": int(st.get("audit_events", 0)),
+                    }
+            except Exception:
+                data = {"error": "could not read governance"}
+            self.wfile.write(json.dumps(data).encode())
+        elif path == "/audit":
+            self._set_json(200)
+            try:
+                if hasattr(self.server.engine, "audit_events"):
+                    data = {"events": self.server.engine.audit_events(limit=50)}
+                else:
+                    data = {"events": []}
+            except Exception:
+                data = {"events": [], "error": "could not read audit"}
+            self.wfile.write(json.dumps(data).encode())
         else:
             self._set_json(404)
             self.wfile.write(json.dumps({"error": "not found"}).encode())
 
     def do_POST(self):
-        if self._path_only(self.path) != "/chat":
+        path = self._path_only(self.path)
+        if path not in ("/chat", "/governance"):
             self._set_json(404)
             self.wfile.write(json.dumps({"error": "not found"}).encode())
             return
@@ -54,6 +82,20 @@ class ChatHandler(BaseHTTPRequestHandler):
         except Exception:
             self._set_json(400)
             self.wfile.write(json.dumps({"error": "invalid json"}).encode())
+            return
+
+        if path == "/governance":
+            try:
+                if hasattr(self.server.engine, "update_governance"):
+                    out = self.server.engine.update_governance(payload)
+                else:
+                    out = {"error": "governance controls unavailable"}
+            except Exception as e:
+                self._set_json(500)
+                self.wfile.write(json.dumps({"error": str(e)}).encode())
+                return
+            self._set_json(200)
+            self.wfile.write(json.dumps(out).encode())
             return
 
         text = payload.get("text", "")

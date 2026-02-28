@@ -85,9 +85,14 @@ class Dashboard:
             self.status = self._fetch_status()
             row = 3
             for key, val in sorted(self.status.items()):
-                color = curses.color_pair(2) if str(val).lower() in ("ok", "loaded", "running", "yes") else curses.color_pair(1)
+                color = (
+                    curses.color_pair(2)
+                    if str(val).lower() in ("ok", "loaded", "running", "yes", "true", "enabled")
+                    else curses.color_pair(1)
+                )
                 stdscr.addstr(row, 0, f"{key:15}")
                 stdscr.addstr(row, 16, "●", color)
+                stdscr.addstr(row, 18, f"{val}")
                 row += 1
                 if row >= maxy - 1:
                     break

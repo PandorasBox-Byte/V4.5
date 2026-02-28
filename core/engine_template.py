@@ -5,6 +5,7 @@ import sys
 import math
 import json
 import time
+from collections import deque
 from typing import List
 
 try:
@@ -53,6 +54,9 @@ from core.memory import load_memory, save_memory, prune_memory
 from core.embeddings_cache import load_embeddings, save_embeddings, clear_cache
 from core.github_backend import GitHubBackend
 from core.decision_policy import DecisionPolicy
+from core.safety_gate import SafetyGate
+from core.autonomy_tools import CodeIntelToolkit, ResearchToolkit
+from core.tested_apply import TestedApplyOrchestrator
 
 
 def _path_candidates(raw: str | None) -> List[str]:
@@ -383,6 +387,25 @@ class Engine:
         self._set_status("config", "loaded")
 
         self.decision_policy = DecisionPolicy()
+        self.safety_gate = SafetyGate()
+        self.code_intel_toolkit = CodeIntelToolkit(workspace_root=os.getcwd())
+        self.research_toolkit = ResearchToolkit()
+        self.tested_apply_orchestrator = TestedApplyOrchestrator(workspace_root=os.getcwd())
+        self.autonomy_paused = os.environ.get("EVOAI_AUTONOMY_PAUSED", "0").lower() in ("1", "true", "yes")
+        self.autonomy_budget_max = max(0, int(os.environ.get("EVOAI_AUTONOMY_BUDGET_MAX", "25")))
+        self.autonomy_budget_remaining = max(
+            0,
+            int(os.environ.get("EVOAI_AUTONOMY_BUDGET_REMAINING", str(self.autonomy_budget_max))),
+        )
+        self._apply_governance_policy_defaults()
+        self.audit_max_events = max(10, int(os.environ.get("EVOAI_AUDIT_MAX_EVENTS", "200")))
+        self._audit_events = deque(maxlen=self.audit_max_events)
+        self.outcome_log_enabled = os.environ.get("EVOAI_ENABLE_OUTCOME_LOG", "0").lower() in (
+            "1",
+            "true",
+            "yes",
+        )
+        self.outcomes_path = os.environ.get("EVOAI_OUTCOMES_PATH", os.path.join("data", "autonomy_outcomes.jsonl"))
         self.decision_max_proactive_per_turn = int(
             os.environ.get("EVOAI_DECISION_MAX_PROACTIVE_PER_TURN", "2")
         )
@@ -395,6 +418,26 @@ class Engine:
         self._set_status("decision_width", str(self.decision_policy.width))
         self._set_status("decision_model_loaded", str(self.decision_policy.model_loaded).lower())
         self._set_status("decision_model_path", str(self.decision_policy.model_path))
+        self._set_status("safety_gate", "enabled" if self.safety_gate.enabled else "disabled")
+        self._set_status("safety_allow_network", str(self.safety_gate.allow_network_actions).lower())
+        self._set_status("safety_allow_self_modify", str(self.safety_gate.allow_self_modify).lower())
+        self._set_status("research_web_enabled", str(self.research_toolkit.allow_web).lower())
+        self._set_status("tested_apply_post_pytest", str(self.tested_apply_orchestrator.post_pytest).lower())
+        self._set_status("autonomy_paused", str(self.autonomy_paused).lower())
+        self._set_status("autonomy_budget_max", str(self.autonomy_budget_max))
+        self._set_status("autonomy_budget_remaining", str(self.autonomy_budget_remaining))
+        self._set_status("governance_policy_loaded", str(getattr(self, "governance_policy_loaded", False)).lower())
+        self._set_status(
+            "governance_policy_recommendation",
+            str(getattr(self, "governance_policy_recommendation", "none")),
+        )
+        self._set_status(
+            "governance_policy_applied",
+            str(getattr(self, "governance_policy_applied", "none")),
+        )
+        self._set_status("audit_events", "0")
+        self._set_status("outcome_log_enabled", str(self.outcome_log_enabled).lower())
+        self._set_status("outcomes_path", str(self.outcomes_path))
 
         _report(0.10, "loading embeddings model")
         if SentenceTransformer is not None:
@@ -810,6 +853,11 @@ class Engine:
     def try_handle_autonomous_request(self, text: str, progress_cb=None) -> str | None:
         if not self._is_self_test_request(text):
             return None
+        allowed, reason = self.safety_gate.evaluate("self_test", text, self)
+        if not allowed:
+            self._set_status("safety_last_action", "self_test")
+            self._set_status("safety_last_result", f"blocked:{reason}")
+            return "Safety policy blocked autonomous self-test execution for this request."
         reply = self.run_self_test(progress_cb=progress_cb)
         try:
             self.record_interaction(str(text), reply)
@@ -1033,7 +1081,11 @@ class Engine:
         if autonomous is not None:
             return autonomous
 
-        external_reply = self._try_external_conversation_reply(str(text))
+        ext_allowed, ext_reason = self.safety_gate.evaluate("external_backend", str(text), self)
+        external_reply = self._try_external_conversation_reply(str(text)) if ext_allowed else None
+        if not ext_allowed:
+            self._set_status("safety_last_action", "external_backend")
+            self._set_status("safety_last_result", f"blocked:{ext_reason}")
         if external_reply:
             self.record_interaction(str(text), external_reply)
             self._set_status("decision_last_action", "external_backend")
@@ -1080,6 +1132,29 @@ class Engine:
         self._set_status("decision_last_latency_ms", f"{decision.get('elapsed_ms', 0.0):.2f}")
         self._set_status("decision_last_reason", str(decision.get("reason", "unknown")))
 
+        gov_allowed, gov_reason = self._governance_allows(str(action))
+        if not gov_allowed:
+            self._set_status("safety_last_action", str(action))
+            self._set_status("safety_last_result", f"blocked:{gov_reason}")
+            self._audit_event("blocked", str(action), gov_reason, text)
+            reply = "Autonomy governance blocked this action, so I’ll continue in safe mode."
+            safe_reply = self.responder.respond(text, self)
+            return f"{reply} {safe_reply}".strip()
+
+        allowed, reason = self.safety_gate.evaluate(str(action), str(text), self)
+        previous_safety_result = str(self._status.get("safety_last_result", ""))
+        previous_was_blocked = previous_safety_result.startswith("blocked:")
+        if not previous_was_blocked or not allowed:
+            self._set_status("safety_last_action", str(action))
+            self._set_status("safety_last_result", "ok" if allowed else f"blocked:{reason}")
+        if not allowed:
+            self._audit_event("blocked", str(action), reason, text)
+            reply = "I can’t run that autonomous action under current safety settings, so I’ll continue in safe mode."
+            safe_reply = self.responder.respond(text, self)
+            return f"{reply} {safe_reply}".strip()
+
+        self._audit_event("allow", str(action), "ok", text)
+
         if action == "simple_reply":
             reply = SimpleResponder().respond(text, self)
         elif action == "llm_generate" and self.llm_model and self.llm_tokenizer:
@@ -1111,6 +1186,52 @@ class Engine:
                 reply = (clar + " " + base).strip() if clar else base
             except Exception:
                 reply = self.responder.respond(text, self)
+        elif action == "autonomy_plan":
+            reply = (
+                "Autonomy plan scaffold is active: define objective, enforce safety budget, "
+                "then execute incremental validated actions."
+            )
+            self.record_interaction(text, reply)
+        elif action == "safety_check":
+            meta = self.safety_gate.metadata()
+            reply = (
+                "Safety gate status — "
+                f"enabled={meta.get('enabled')}, "
+                f"network={meta.get('allow_network_actions')}, "
+                f"self_modify={meta.get('allow_self_modify')}, "
+                f"autonomy={meta.get('allow_autonomy_actions')}"
+            )
+            self.record_interaction(text, reply)
+        elif action == "code_intel_query":
+            report = self.code_intel_toolkit.analyze(text)
+            reply = str(report.get("summary", "Code intel query completed."))
+            self._set_status("code_intel_last_matches", str(len(report.get("matches", []))))
+            self.record_interaction(text, reply)
+        elif action == "research_query":
+            result = self.research_toolkit.research(text, self)
+            reply = str(result.get("summary", "Research query completed."))
+            self._set_status("research_last_plugin_hits", str(len(result.get("plugin_findings", []))))
+            self._set_status("research_last_web_results", str(len(result.get("web_results", []))))
+            self.record_interaction(text, reply)
+        elif action == "tested_apply":
+            outcome = self.tested_apply_orchestrator.run(text)
+            reply = str(outcome.get("summary", "Tested apply finished."))
+            self._set_status("tested_apply_last_ok", str(bool(outcome.get("ok", False))).lower())
+            self._set_status("tested_apply_last_reason", str(outcome.get("reason", "unknown")))
+            self._set_status("tested_apply_last_files", str(int(outcome.get("files", 0))))
+            self._set_status("tested_apply_last_score", f"{float(outcome.get('retention_score', 0.0)):.3f}")
+            self._audit_event(
+                "outcome",
+                "tested_apply",
+                str(outcome.get("reason", "unknown")),
+                text,
+                meta={
+                    "ok": bool(outcome.get("ok", False)),
+                    "files": int(outcome.get("files", 0)),
+                    "retention_score": float(outcome.get("retention_score", 0.0) or 0.0),
+                },
+            )
+            self.record_interaction(text, reply)
         else:
             reply = self.responder.respond(text, self)
             self._turns_since_proactive += 1
@@ -1147,6 +1268,139 @@ class Engine:
     def status(self) -> dict:
         """Return a snapshot of the engine's internal status dictionary."""
         return dict(self._status)
+
+    def _apply_governance_policy_defaults(self) -> None:
+        self.governance_policy_loaded = False
+        self.governance_policy_recommendation = "none"
+        self.governance_policy_applied = "none"
+
+        autotune = os.environ.get("EVOAI_GOVERNANCE_POLICY_AUTOTUNE", "1").lower() in (
+            "1",
+            "true",
+            "yes",
+        )
+        if not autotune:
+            self.governance_policy_applied = "autotune_disabled"
+            return
+
+        policy_path = os.environ.get(
+            "EVOAI_GOVERNANCE_POLICY_PATH",
+            os.path.join("data", "governance_policy", "metadata.json"),
+        )
+        if not os.path.exists(policy_path):
+            self.governance_policy_applied = "policy_missing"
+            return
+
+        try:
+            with open(policy_path, "r", encoding="utf-8") as handle:
+                metadata = json.load(handle)
+        except Exception:
+            self.governance_policy_applied = "policy_invalid"
+            return
+
+        if not isinstance(metadata, dict):
+            self.governance_policy_applied = "policy_invalid"
+            return
+
+        recommendation = str(metadata.get("recommendation", "balanced") or "balanced").strip().lower()
+        self.governance_policy_loaded = True
+        self.governance_policy_recommendation = recommendation
+
+        if "EVOAI_AUTONOMY_BUDGET_MAX" in os.environ:
+            self.governance_policy_applied = "skipped_env_override"
+            return
+
+        before_max = int(self.autonomy_budget_max)
+        if recommendation == "tighten_autonomy":
+            tuned = max(1, int(round(before_max * 0.5)))
+            self.autonomy_budget_max = tuned
+            self.autonomy_budget_remaining = min(int(self.autonomy_budget_remaining), tuned)
+            self.governance_policy_applied = "budget_tightened"
+        elif recommendation == "loosen_autonomy":
+            tuned = min(500, max(before_max + 1, int(round(before_max * 1.5))))
+            self.autonomy_budget_max = tuned
+            self.autonomy_budget_remaining = min(int(self.autonomy_budget_remaining), tuned)
+            self.governance_policy_applied = "budget_loosened"
+        else:
+            self.governance_policy_applied = "balanced_no_change"
+
+    def governance_status(self) -> dict:
+        return {
+            "autonomy_paused": bool(self.autonomy_paused),
+            "autonomy_budget_max": int(self.autonomy_budget_max),
+            "autonomy_budget_remaining": int(self.autonomy_budget_remaining),
+            "audit_events": len(self._audit_events),
+            "governance_policy_loaded": bool(self.governance_policy_loaded),
+            "governance_policy_recommendation": str(self.governance_policy_recommendation),
+            "governance_policy_applied": str(self.governance_policy_applied),
+        }
+
+    def update_governance(self, payload: dict | None) -> dict:
+        body = payload if isinstance(payload, dict) else {}
+        if "autonomy_paused" in body:
+            self.autonomy_paused = bool(body.get("autonomy_paused"))
+
+        if "autonomy_budget_max" in body:
+            try:
+                self.autonomy_budget_max = max(0, int(body.get("autonomy_budget_max")))
+            except Exception:
+                pass
+
+        if body.get("reset_budget"):
+            self.autonomy_budget_remaining = int(self.autonomy_budget_max)
+
+        if "autonomy_budget_remaining" in body:
+            try:
+                value = max(0, int(body.get("autonomy_budget_remaining")))
+                self.autonomy_budget_remaining = min(value, int(self.autonomy_budget_max))
+            except Exception:
+                pass
+
+        self._set_status("autonomy_paused", str(self.autonomy_paused).lower())
+        self._set_status("autonomy_budget_max", str(self.autonomy_budget_max))
+        self._set_status("autonomy_budget_remaining", str(self.autonomy_budget_remaining))
+        return self.governance_status()
+
+    def audit_events(self, limit: int = 50) -> list[dict]:
+        lim = max(1, int(limit))
+        items = list(self._audit_events)
+        return items[-lim:]
+
+    def _audit_event(self, kind: str, action: str, reason: str, text: str, meta: dict | None = None) -> None:
+        try:
+            event = {
+                "ts": int(time.time()),
+                "kind": str(kind),
+                "action": str(action),
+                "reason": str(reason),
+                "query": str(text or "")[:180],
+            }
+            if isinstance(meta, dict) and meta:
+                event["meta"] = meta
+            self._audit_events.append(event)
+            self._set_status("audit_events", str(len(self._audit_events)))
+            if self.outcome_log_enabled:
+                out_path = str(self.outcomes_path)
+                parent = os.path.dirname(out_path)
+                if parent:
+                    os.makedirs(parent, exist_ok=True)
+                with open(out_path, "a", encoding="utf-8") as handle:
+                    handle.write(json.dumps(event, ensure_ascii=False) + "\n")
+        except Exception:
+            pass
+
+    def _governance_allows(self, action: str) -> tuple[bool, str]:
+        action_name = str(action or "delegate")
+        autonomy_actions = getattr(self.safety_gate, "AUTONOMY_ACTIONS", set())
+        if action_name not in autonomy_actions:
+            return True, "ok"
+        if self.autonomy_paused:
+            return False, "autonomy_paused"
+        if self.autonomy_budget_remaining <= 0:
+            return False, "autonomy_budget_exhausted"
+        self.autonomy_budget_remaining -= 1
+        self._set_status("autonomy_budget_remaining", str(self.autonomy_budget_remaining))
+        return True, "ok"
 
     def _set_status(self, key: str, value: str) -> None:
         try:
