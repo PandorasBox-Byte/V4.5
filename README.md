@@ -1,10 +1,10 @@
-# EvoAI V7.0.0 (V7)
+# EvoAI V7.1.0 (V7)
 
-Local assistant runtime with memory, semantic similarity retrieval, optional local LLM generation, optional GitHub Models backend, plugin support, API server, and startup self-test.
+Local assistant runtime with memory, semantic similarity retrieval, optional local LLM generation, optional GitHub Models backend, plugin support, API server, startup self-test, autonomous coding assistant with specialized CodeIntel → Generate → Validate → Apply pipeline.
 
 ## Versioning tally system
 
-- Current release: `7.0.0` (`V7`)
+- Current release: `7.1.0` (`V7`)
 - Version format: `MAJOR.MINOR.PATCH`
 - `MAJOR`: increment for major structural changes (non-engine architecture shifts)
 - `MINOR`: increment for feature-level/minor changes
@@ -20,19 +20,19 @@ python scripts/bump_version.py --change patch --reason "describe the bug fix"
 
 This updates both `version_tally.json` and `setup.cfg`.
 
-## Latest major summary (7.0.0)
+## Latest minor summary (7.1.0)
 
-- Introduced autonomous governance controls with runtime budget/pause enforcement and decision-level gating.
-- Added centralized safety gate checks for autonomous, network, and self-modification actions.
-- Added `tested_apply` orchestration with validate/apply/rollback flow and retention-score checks.
-- Added governance and audit API endpoints plus runtime status telemetry for policy visibility.
-- Closed the loop with startup policy autotuning from governance trainer metadata (`tighten`/`balanced`/`loosen`).
+- Introduced `CodeAssistant` orchestrator module coordinating autonomous coding workflows.
+- Decision policy recognizes coding intents (fix, debug, implement, refactor, optimize, review) and routes to `code_assist` action.
+- Engine integration: CodeAssistant embedded in core, decision routing wired into respond() method.
+- Coding workflow: analyze codebase → detect hotspots → generate candidates → validate → review/apply.
+- Maintains broad-spectrum assistant capabilities (memory, research, LLM) while specializing coding operations.
 
-## Previous patch summary (5.1.4)
+## Previous patch summary (7.0.4)
 
-- Fixed partial-update behavior: after `stash pop`, updater now normalizes tracked non-runtime files to the target tag.
-- Preserves runtime-local files under `data/` while restoring code/docs to the release state.
-- Added regression test coverage to ensure non-runtime tracked files are fully normalized.
+- Added git metadata filtering to verification/repair system: excludes `.gitignore`, `.gitattributes`, `.github/` paths.
+- Cleaner standalone distributions: `./repair.sh verify` reports only application files.
+- Prepares for eventual standalone deployment without git infrastructure overhead.
 
 ## Previous patch summary (5.1.3)
 
@@ -49,6 +49,11 @@ This updates both `version_tally.json` and `setup.cfg`.
 ## Release history (major/minor/patch)
 
 - `7.0.0` **MAJOR**: autonomous governance architecture release (safety gates, policy controls, tested-apply orchestration, audit/governance APIs, and runtime closed-loop policy adaptation).
+- `7.0.1` **PATCH**: updater bug fix: detect version file inconsistencies between `version_tally.json` and `setup.cfg`, use lower version when divergent.
+- `7.0.2` **PATCH**: concrete updater: added file verification system with `verify_complete_state()` and auto-repair via `repair_to_remote_state()`.
+- `7.0.3` **PATCH**: updater protection: excluded `core/auto_updater.py` from repairs (redundancy guarantee); added standalone `repair.sh` CLI script.
+- `7.0.4` **PATCH**: git metadata filtering: excluded `.gitignore`, `.gitattributes`, `.github/` from file verification/repair for cleaner standalone distributions.
+- `7.1.0` **MINOR**: CodeAssistant orchestrator: autonomous coding workflows with decision routing, CodeIntel analysis, LLM generation, validation, and safety gates.
 - `6.0.0` **MAJOR**: runtime/startup optimization pass, plugin/API efficiency improvements, startup script consolidation, and cleanup of legacy backup artifacts.
 - `5.0.0` **MAJOR**: backend/architecture shift (GitHub backend integration, decision layer, startup/runtime contract updates).
 - `5.0.1` **PATCH**: TUI version label + startup checklist grid layout improvements.

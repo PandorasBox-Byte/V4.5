@@ -1,7 +1,7 @@
 # READMECODE (Technical Context + Change History)
 
 This document is a technical handoff/reference for developers and AI assistants.
-It describes what EvoAI V7.0.0 (V7) is, how it starts, model/data flow, and major fixes made in this workspace.
+It describes what EvoAI V7.1.0 (V7) is, how it starts, model/data flow, and major fixes made in this workspace.
 
 ## Versioning rule (project contract)
 
@@ -15,6 +15,11 @@ It describes what EvoAI V7.0.0 (V7) is, how it starts, model/data flow, and majo
 ## Release history (major/minor/patch)
 
 - `7.0.0` **MAJOR**: autonomous governance architecture release with safety gating, policy controls, tested-apply orchestration, audit/governance APIs, and runtime policy closed-loop adaptation.
+- `7.0.1` **PATCH**: updater bug fix: detect version file inconsistencies between `version_tally.json` and `setup.cfg`, use lower version when divergent.
+- `7.0.2` **PATCH**: concrete updater: added file verification system with `verify_complete_state()` and auto-repair via `repair_to_remote_state()`.
+- `7.0.3` **PATCH**: updater protection: excluded `core/auto_updater.py` from repairs (redundancy guarantee); added standalone `repair.sh` CLI script.
+- `7.0.4` **PATCH**: git metadata filtering: excluded `.gitignore`, `.gitattributes`, `.github/` from file verification/repair for cleaner standalone distributions.
+- `7.1.0` **MINOR**: CodeAssistant orchestrator: autonomous coding workflows with decision routing, CodeIntel analysis, LLM generation, validation, and safety gates.
 - `6.0.0` **MAJOR**: deep optimization pass across runtime persistence, startup latency, plugin/API routing efficiency, and startup script consolidation.
 - `5.0.0` **MAJOR**: backend migration + decision layer integration + startup/runtime contract changes.
 - `5.0.1` **PATCH**: TUI version label and startup checklist grid rendering updates.
@@ -24,15 +29,18 @@ It describes what EvoAI V7.0.0 (V7) is, how it starts, model/data flow, and majo
 - `5.1.3` **PATCH**: launcher token prompt handling fixed for non-interactive mode and pre-set env tokens.
 - `5.1.4` **PATCH**: updater normalization extended to tracked non-runtime files to prevent partial updates.
 
-## Latest major change (7.0.0)
+## Latest minor change (7.1.0)
 
-- Expanded decision actions and integrated autonomous execution scaffolds (`autonomy_plan`, `safety_check`, `code_intel_query`, `research_query`, `tested_apply`).
-- Added `core/safety_gate.py` for centralized runtime policy checks (network/self-modify/autonomy/input-size).
-- Added `core/autonomy_tools.py` (`CodeIntelToolkit`, `ResearchToolkit`) and integrated both into engine action routing.
-- Added `core/tested_apply.py` for validated apply + rollback pipeline with benchmark/retention scoring.
-- Added governance controls and audit stream in `core/engine_template.py` (`governance_status`, `update_governance`, `_audit_event`, `_governance_allows`).
-- Added governance API endpoints in `core/api_server.py` (`GET/POST /governance`, `GET /audit`) plus coverage in `tests/test_api_server.py`.
-- Added governance-policy training output pipeline (`train_governance_policy`) and startup closed-loop default adaptation from `data/governance_policy/metadata.json`.
+- Added `core/code_assistant.py` implementing `CodeAssistant` orchestrator class for autonomous coding workflows.
+- CodeAssistant coordinates: analyze (CodeIntel) → generate (LLM) → validate (TestedApply) → apply (safety-gated).
+- Updated `core/decision_policy.py` to recognize coding intents (fix, debug, implement, refactor, optimize, review) and route to `code_assist` action.
+- Updated `core/engine_template.py`:
+  - Added `CodeAssistant` import and initialization
+  - Added `code_assist` action handler in `respond()` method
+  - Integrated with decision policy routing and autonomy governance
+  - Added status tracking for code assist operations
+- Maintains broad-spectrum assistant capabilities (memory, research, general LLM) while specializing coding operations.
+- Decision policy keywords for coding intents: "fix", "bug", "debug", "error", "implement", "feature", "refactor", "rewrite", "optimize", "improve", "review code", "generate code", "generate function", "generate test".
 
 ## Latest minor change (5.1.0)
 
@@ -240,19 +248,48 @@ Current artifact locations:
 - Use `.venv311` for real training/inference with torch/transformers.
 - Tiny local LLM (`sshleifer/tiny-gpt2`) is fast but low quality; useful for smoke tests, not high-quality generation.
 
-## 10) Validation references
+## 10) CodeAssistant orchestrator (autonomous coding)
 
-Representative validation done after recent changes:
-- launcher tests (`tests/test_launcher.py`) pass
-- engine tests (`tests/test_engine.py`) pass
-- language tests (`tests/test_language.py`) pass
-- trainer tests (`tests/test_trainer.py`) pass
-- full suite via `tests/run_all.sh` passes
+New module:
+- `core/code_assistant.py`
 
-Live backend validation script:
-- `scripts/live_github_backend_test.py` performs an authenticated GitHub model smoke test when token is present
+Architecture:
+- `CodeAssistant` class orchestrates a complete coding workflow: analyze → generate → validate → apply
+- Coordinates with `CodeIntelToolkit` for codebase analysis and hotspot detection
+- Integrates with engine's LLM for candidate code generation
+- Uses `TestedApplyOrchestrator` for validation and rollback
+- Subject to `SafetyGate` checks before generation and apply steps
 
-## 11) Suggested future upgrades
+Decision routing:
+- `core/decision_policy.py` updated with `code_assist` action
+- Detects coding intents: "fix", "bug", "debug", "error", "implement", "feature", "refactor", "rewrite", "optimize", "improve", "review code", "generate code", "write function", "generate test"
+- Routes matching queries to `code_assist` with confidence threshold
+
+Engine integration (`core/engine_template.py`):
+- `CodeAssistant` instantiated during engine initialization
+- `respond()` method handles `code_assist` action with full workflow execution
+- Status tracking: `code_assist_step`, `code_assist_last_reason`, `code_assist_matches`
+- Audit events recorded for all code assist outcomes
+
+Workflow execution (`CodeAssistant.workflow()`):
+- Step 1: Analyze user query against local codebase (CodeIntel)
+- Step 2: Check generation allowed via SafetyGate
+- Step 3: Generate code candidate (LLM or prompt for user)
+- Step 4: Check apply allowed via SafetyGate
+- Step 5: Validate candidate with TestedApply (unit tests, benchmark)
+- Step 6: Return for user review or auto-apply (if enabled)
+
+Safety guarantees:
+- Generation blocked if `EVOAI_DECISION_ALLOW_AUTONOMY=0` or SafetyGate rejects
+- Apply blocked if `EVOAI_AUTONOMY_PAUSED=1` or SafetyGate rejects
+- All actions subject to unified autonomy governance policy
+
+Status env toggles:
+- `EVOAI_AUTONOMY_PAUSED` (pause all autonomous actions including code assist)
+- `EVOAI_AUTONOMY_BUDGET_MAX` (max autonomous actions per session)
+- `EVOAI_AUTONOMY_BUDGET_REMAINING` (remaining budget)
+
+## 11) Known constraints
 
 1. Replace tiny GPT-2 with a better local model for usable generation quality.
 2. Add quality benchmark prompts and save baseline outputs for regression tracking.

@@ -1,8 +1,8 @@
 {
-  "current_version": "7.0.4",
+  "current_version": "7.1.0",
   "major": 7,
-  "minor": 0,
-  "patch": 4,
+  "minor": 1,
+  "patch": 0,
   "rules": {
     "major": "Major structural changes (non-engine architecture shifts)",
     "minor": "Feature-level and other minor changes",
@@ -99,6 +99,20 @@
       "from": "7.0.3",
       "to": "7.0.4",
       "reason": "Filter: exclude git metadata files from repair system for cleaner standalone distributions"
+    },
+    {
+      "date": "2026-02-28",
+      "change": "patch",
+      "from": "7.0.4",
+      "to": "7.0.5",
+      "reason": "CodeAssistant orchestrator: autonomous coding workflows with decision routing"
+    },
+    {
+      "date": "2026-02-28",
+      "change": "minor",
+      "from": "7.0.5",
+      "to": "7.1.0",
+      "reason": "CodeAssistant orchestrator: autonomous coding workflows with decision routing"
     }
   ]
 }

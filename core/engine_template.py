@@ -57,6 +57,7 @@ from core.decision_policy import DecisionPolicy
 from core.safety_gate import SafetyGate
 from core.autonomy_tools import CodeIntelToolkit, ResearchToolkit
 from core.tested_apply import TestedApplyOrchestrator
+from core.code_assistant import CodeAssistant
 
 
 def _path_candidates(raw: str | None) -> List[str]:
@@ -391,6 +392,7 @@ class Engine:
         self.code_intel_toolkit = CodeIntelToolkit(workspace_root=os.getcwd())
         self.research_toolkit = ResearchToolkit()
         self.tested_apply_orchestrator = TestedApplyOrchestrator(workspace_root=os.getcwd())
+        self.code_assistant = CodeAssistant(workspace_root=os.getcwd())
         self.autonomy_paused = os.environ.get("EVOAI_AUTONOMY_PAUSED", "0").lower() in ("1", "true", "yes")
         self.autonomy_budget_max = max(0, int(os.environ.get("EVOAI_AUTONOMY_BUDGET_MAX", "25")))
         self.autonomy_budget_remaining = max(
@@ -1231,6 +1233,32 @@ class Engine:
                     "retention_score": float(outcome.get("retention_score", 0.0) or 0.0),
                 },
             )
+            self.record_interaction(text, reply)
+        elif action == "code_assist":
+            workflow_result = self.code_assistant.workflow(text, engine=self)
+            if workflow_result.get("ok"):
+                step = workflow_result.get("step", "unknown")
+                if step == "validation_complete" or step == "validation_blocked":
+                    candidate = workflow_result.get("candidate", "")
+                    reply = f"Code analysis complete. Candidate code generated:\n\n{candidate}\n\nReview needed before applying."
+                    self._set_status("code_assist_step", "validation_complete")
+                elif step == "apply":
+                    apply_result = workflow_result.get("apply_result", {})
+                    reply = f"Code applied successfully. Retention score: {apply_result.get('retention_score', 0.0):.3f}"
+                    self._set_status("code_assist_step", "applied")
+                else:
+                    reply = f"Code assist completed at step: {step}"
+                    self._set_status("code_assist_step", step)
+            else:
+                step = workflow_result.get("step", "unknown")
+                reason = workflow_result.get("reason", "unknown")
+                reply = f"Code assist stopped at {step}: {reason}"
+                self._set_status("code_assist_step", f"failed:{step}")
+            
+            self._set_status("code_assist_last_reason", workflow_result.get("reason", "unknown"))
+            analysis = workflow_result.get("analysis", {})
+            self._set_status("code_assist_matches", str(len(analysis.get("matches", []))))
+            self._audit_event("outcome", "code_assist", workflow_result.get("reason", ""), text)
             self.record_interaction(text, reply)
         else:
             reply = self.responder.respond(text, self)

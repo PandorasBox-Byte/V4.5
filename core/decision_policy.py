@@ -65,6 +65,7 @@ class DecisionPolicy:
         "code_intel_query",
         "research_query",
         "tested_apply",
+        "code_assist",
     ]
 
     def __init__(self):
@@ -177,6 +178,15 @@ class DecisionPolicy:
             logits["research_query"] += 0.30
         if any(k in lowered for k in ("apply patch", "rewrite code", "self modify", "optimize code")):
             logits["tested_apply"] += 0.45
+
+        # Coding assistant detection: fix, implement, refactor, debug, generate, review
+        coding_keywords = (
+            "fix", "bug", "debug", "error", "implement", "feature", "refactor", "rewrite",
+            "optimize", "improve", "review code", "generate code", "write function", "generate function",
+            "create method", "generate test", "improve test", "add test"
+        )
+        if any(k in lowered for k in coding_keywords):
+            logits["code_assist"] += 0.50
 
         logits["delegate"] += 0.4
 
