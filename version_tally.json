@@ -1,8 +1,8 @@
 {
-  "current_version": "7.0.3",
+  "current_version": "7.0.4",
   "major": 7,
   "minor": 0,
-  "patch": 3,
+  "patch": 4,
   "rules": {
     "major": "Major structural changes (non-engine architecture shifts)",
     "minor": "Feature-level and other minor changes",
@@ -92,6 +92,13 @@
       "from": "7.0.2",
       "to": "7.0.3",
       "reason": "Updater protection and repair CLI"
+    },
+    {
+      "date": "2026-02-28",
+      "change": "patch",
+      "from": "7.0.3",
+      "to": "7.0.4",
+      "reason": "Filter: exclude git metadata files from repair system for cleaner standalone distributions"
     }
   ]
 }

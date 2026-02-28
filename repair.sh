@@ -125,6 +125,7 @@ Examples:
 
 Notes:
   - The updater file (core/auto_updater.py) is protected from repairs
+  - Git metadata files (.gitignore, .gitattributes, .github/) are excluded from repairs
   - Runtime data under data/ is preserved during repairs
   - All repairs are non-interactive and suitable for automation
 EOF

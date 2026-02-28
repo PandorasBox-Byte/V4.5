@@ -500,11 +500,41 @@ def run_update_flow(manifest_url: str) -> bool:
         return True
 
 
+def _is_git_metadata_file(path: str) -> bool:
+    """Check if a file is git infrastructure/metadata that should be excluded from repairs.
+    
+    These files are not essential to the application itself and will not be present
+    in eventual standalone distributions.
+    """
+    normalized = path.replace("\\", "/").lower()
+    # Exclude git configuration and CI/CD files
+    excluded_patterns = {
+        ".gitignore",
+        ".gitattributes",
+        ".github/",        # GitHub workflows, actions
+        ".gitkeep",
+        ".github",
+    }
+    
+    for pattern in excluded_patterns:
+        if pattern.endswith("/"):
+            # Directory pattern
+            if normalized.startswith(pattern):
+                return True
+        else:
+            # Exact match or as full path
+            if normalized == pattern or normalized.endswith("/" + pattern):
+                return True
+    
+    return False
+
+
 def get_remote_file_list(tag: str, root: Path | None = None) -> set[str]:
     """Fetch the complete list of tracked files in the remote tag.
     
     Uses ``git ls-tree -r`` to recursively enumerate all files tracked at that tag.
     Returns a set of relative paths (using forward slashes).
+    Excludes git metadata files.
     """
     if root is None:
         root = _repo_root()
@@ -516,7 +546,7 @@ def get_remote_file_list(tag: str, root: Path | None = None) -> set[str]:
     files = set()
     for line in out.splitlines():
         path = line.strip()
-        if path:
+        if path and not _is_git_metadata_file(path):
             files.add(path.replace("\\", "/"))
     return files
 
@@ -555,7 +585,9 @@ def verify_complete_state(target_tag: str, root: Path | None = None) -> dict:
     for local_path in root.rglob("*"):
         if local_path.is_file() and not str(local_path.relative_to(root)).startswith(".git"):
             rel = local_path.relative_to(root)
-            local_files.add(str(rel).replace("\\", "/"))
+            rel_str = str(rel).replace("\\", "/")
+            if not _is_git_metadata_file(rel_str):
+                local_files.add(rel_str)
     
     remote_set = set(remote_files)
     local_set = set(local_files)
@@ -630,7 +662,7 @@ def repair_to_remote_state(
     
     # Protect the updater itself from being modified/repaired
     # This ensures we always have a working copy for future repairs
-    to_repair = [f for f in to_repair if f != "core/auto_updater.py"]
+    to_repair = [f for f in to_repair if f != "core/auto_updater.py" and not _is_git_metadata_file(f)]
     
     if not to_repair:
         _progress(1.0, "No files to repair (updater is protected)")
