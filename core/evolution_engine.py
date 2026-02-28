@@ -202,7 +202,7 @@ class EvolutionEngine:
         
         try:
             # Check for regression
-            if self.metrics_tracker.detect_regression(window_size=10):
+            if self.metrics_tracker.detect_regression(lookback=10):
                 metrics["regression_detected"] = True
                 logger.warning("Performance regression detected")
             
@@ -254,7 +254,7 @@ class EvolutionEngine:
         
         try:
             # Get top gaps from gap detector
-            top_gaps = self.gap_detector.get_top_gaps(limit=5)
+            top_gaps = self.gap_detector.get_top_gaps(n=5)
             
             for gap in top_gaps:
                 gaps.append(gap["query"])
