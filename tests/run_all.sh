@@ -1,10 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-if [ -x "./.venv/bin/python" ]; then
-  PY="./.venv/bin/python"
-elif [ -x "./v4env/bin/python" ]; then
-  PY="./v4env/bin/python"
+if [ -x "./.venv311/bin/python" ]; then
+  PY="./.venv311/bin/python"
 else
   PY="python3"
 fi

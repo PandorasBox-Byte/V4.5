@@ -1,7 +1,7 @@
 {
-  "current_version": "7.2.0",
+  "current_version": "7.3.0",
   "major": 7,
-  "minor": 2,
+  "minor": 3,
   "patch": 0,
   "rules": {
     "major": "Major structural changes (non-engine architecture shifts)",
@@ -120,6 +120,13 @@
       "from": "7.1.0",
       "to": "7.2.0",
       "reason": "Cleanup and optimization: unified core architecture, removed temp files, enhanced integration"
+    },
+    {
+      "date": "2026-02-28",
+      "change": "minor",
+      "from": "7.2.0",
+      "to": "7.3.0",
+      "reason": "Removed redundant virtual environments, standardized on .venv311 for PyTorch compatibility"
     }
   ]
 }

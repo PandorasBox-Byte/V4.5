@@ -23,7 +23,8 @@ class CodeIntelToolkit:
     def _iter_python_files(self) -> List[str]:
         results: List[str] = []
         for root, dirs, files in os.walk(self.workspace_root):
-            dirs[:] = [d for d in dirs if d not in {".git", "__pycache__", ".venv", "v4env", "site-packages"}]
+            # Exclude venvs, git, caches, and site-packages from code analysis
+            dirs[:] = [d for d in dirs if not d.startswith(".venv") and d not in {".git", "__pycache__", "v4env", "site-packages", "dist", "build"}]
             for name in files:
                 if not name.endswith(".py"):
                     continue

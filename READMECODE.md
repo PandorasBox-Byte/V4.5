@@ -1,7 +1,7 @@
 # READMECODE (Technical Context + Change History)
 
 This document is a technical handoff/reference for developers and AI assistants.
-It describes what EvoAI V7.2.0 (V7) is, how it starts, model/data flow, and major fixes made in this workspace.
+It describes what EvoAI V7.3.0 (V7) is, how it starts, model/data flow, and major fixes made in this workspace.
 
 ## Versioning rule (project contract)
 
@@ -21,6 +21,7 @@ It describes what EvoAI V7.2.0 (V7) is, how it starts, model/data flow, and majo
 - `7.0.4` **PATCH**: git metadata filtering: excluded `.gitignore`, `.gitattributes`, `.github/` from file verification/repair for cleaner standalone distributions.
 - `7.1.0` **MINOR**: CodeAssistant orchestrator: autonomous coding workflows with decision routing, CodeIntel analysis, LLM generation, validation, and safety gates.
 - `7.2.0` **MINOR**: Cleanup and optimization: unified core architecture with consolidated exports, removed temp/debug files, enhanced Engine documentation, optimized repository structure.
+- `7.3.0` **MINOR**: Virtual environment consolidation: removed redundant venvs (.venv, v4env), standardized on .venv311 (Python 3.11) for PyTorch/transformers compatibility, freed 229MB.
 - `6.0.0` **MAJOR**: deep optimization pass across runtime persistence, startup latency, plugin/API routing efficiency, and startup script consolidation.
 - `5.0.0` **MAJOR**: backend migration + decision layer integration + startup/runtime contract changes.
 - `5.0.1` **PATCH**: TUI version label and startup checklist grid rendering updates.
@@ -30,7 +31,24 @@ It describes what EvoAI V7.2.0 (V7) is, how it starts, model/data flow, and majo
 - `5.1.3` **PATCH**: launcher token prompt handling fixed for non-interactive mode and pre-set env tokens.
 - `5.1.4` **PATCH**: updater normalization extended to tracked non-runtime files to prevent partial updates.
 
-## Latest minor change (7.2.0)
+## Latest minor change (7.3.0)
+
+- Removed redundant virtual environments:
+  - Deleted `.venv` (Python 3.14, 217MB) - not compatible with PyTorch
+  - Deleted `v4env` (Python 3.14, 12MB) - legacy unused venv
+  - Kept `.venv311` (Python 3.11, 1.2GB) - canonical environment for ML training
+- Updated all venv references:
+  - `tests/run_all.sh`: now checks for `.venv311` first
+  - `README.md`: updated test/training examples to use `.venv311`
+  - `.gitattributes`: removed v4env LFS rule
+  - `core/autonomy_tools.py`: enhanced to exclude all `.venv*` directories from code analysis
+- Benefits:
+  - Freed 229MB disk space
+  - Simplified development environment (single Python 3.11 venv)
+  - Eliminated confusion about which venv to use
+  - PyTorch/transformers training guaranteed to work
+
+## Previous minor change (7.2.0)
 
 - Unified core architecture in `core/__init__.py`:
   - Consolidated module exports for integrated system access

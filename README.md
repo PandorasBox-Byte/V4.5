@@ -1,10 +1,10 @@
-# EvoAI V7.2.0 (V7)
+# EvoAI V7.3.0 (V7)
 
 Local assistant runtime with memory, semantic similarity retrieval, optional local LLM generation, optional GitHub Models backend, plugin support, API server, startup self-test, autonomous coding assistant with specialized CodeIntel → Generate → Validate → Apply pipeline.
 
 ## Versioning tally system
 
-- Current release: `7.2.0` (`V7`)
+- Current release: `7.3.0` (`V7`)
 - Version format: `MAJOR.MINOR.PATCH`
 - `MAJOR`: increment for major structural changes (non-engine architecture shifts)
 - `MINOR`: increment for feature-level/minor changes
@@ -20,7 +20,15 @@ python scripts/bump_version.py --change patch --reason "describe the bug fix"
 
 This updates both `version_tally.json` and `setup.cfg`.
 
-## Latest minor summary (7.2.0)
+## Latest minor summary (7.3.0)
+
+- Removed redundant virtual environments: deleted `.venv` (Python 3.14, 217MB) and `v4env` (12MB).
+- Standardized on `.venv311` (Python 3.11) as the canonical environment for PyTorch/transformers compatibility.
+- Updated all references in scripts, docs, and code intel to use `.venv311`.
+- Enhanced CodeIntelToolkit to exclude all `.venv*` directories from analysis.
+- Freed 229MB disk space, simplified development environment.
+
+## Previous minor summary (7.2.0)
 
 - Unified core architecture: consolidated module exports in `core/__init__.py` for integrated system access.
 - Cleaned workspace: removed all temporary files, debug artifacts, unused modules (network_scanner), example files.
@@ -64,6 +72,7 @@ This updates both `version_tally.json` and `setup.cfg`.
 - `7.0.4` **PATCH**: git metadata filtering: excluded `.gitignore`, `.gitattributes`, `.github/` from file verification/repair for cleaner standalone distributions.
 - `7.1.0` **MINOR**: CodeAssistant orchestrator: autonomous coding workflows with decision routing, CodeIntel analysis, LLM generation, validation, and safety gates.
 - `7.2.0` **MINOR**: Cleanup and optimization: unified core architecture, removed temp/debug files, enhanced integration, improved documentation.
+- `7.3.0` **MINOR**: Virtual environment consolidation: removed redundant venvs (.venv, v4env), standardized on .venv311 for PyTorch compatibility.
 - `6.0.0` **MAJOR**: runtime/startup optimization pass, plugin/API efficiency improvements, startup script consolidation, and cleanup of legacy backup artifacts.
 - `5.0.0` **MAJOR**: backend/architecture shift (GitHub backend integration, decision layer, startup/runtime contract updates).
 - `5.0.1` **PATCH**: TUI version label + startup checklist grid layout improvements.
@@ -175,7 +184,7 @@ Default discovered local paths include:
 bash tests/run_all.sh
 
 # live backend smoke test (requires GITHUB_TOKEN or GH_TOKEN)
-./.venv/bin/python scripts/live_github_backend_test.py
+./.venv311/bin/python scripts/live_github_backend_test.py
 ```
 
 ## Training (recommended path on this Mac)
@@ -212,8 +221,9 @@ Current default training base model is intentionally lightweight (`sshleifer/tin
 	- Confirm `EVOAI_BACKEND_PROVIDER=github`
 - Local LLM output looks low quality:
 	- This is expected with tiny GPT-2; prefer embeddings-first mode or train a stronger local base model
-- Training fails in `.venv` (Python 3.14):
-	- Use `.venv311` for training and model loading with torch/transformers
+- Training fails with Python 3.14:
+	- Always use `.venv311` (Python 3.11) for training and model loading with torch/transformers
+	- Python 3.14 is not compatible with current PyTorch versions
 
 ## Documentation sync policy
 
